@@ -4,6 +4,9 @@ copyright: Copyright © 2026 Jin-wen-jie and contributors
 # The bundled dsh CLI runs with ELECTRON_RUN_AS_NODE, so plain files beat an asar archive.
 asar: false
 npmRebuild: false
+# GitHub is slow or unreachable in some regions; pull the Electron binary from the npmmirror CDN.
+electronDownload:
+  mirror: https://npmmirror.com/mirrors/electron/
 directories:
   output: release
   buildResources: build

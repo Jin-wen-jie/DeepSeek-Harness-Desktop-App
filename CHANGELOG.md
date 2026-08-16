@@ -2,6 +2,30 @@
 
 All notable changes to this project are documented in this file. The format follows [Keep a Changelog](https://keepachangelog.com/en/1.1.0/) and the project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [0.3.0] - 2026-08-17
+
+### Added
+
+- **Token usage statistics** in the app's own settings page (菜单 设置 → 使用统计, `Ctrl+,`):
+  - Exact provider token accounting (input / output / cache-read / cache-write) extracted from the harness's durable session logs (`~/.dsh/sessions`, concatenated-frame zstd archives decoded with the harness's own frame layout) and attributed to local calendar days
+  - Incremental scanning: unchanged session logs are skipped by mtime/size, so background refreshes every 20 seconds stay near-free after the first pass
+  - Simplified settings page focused on tokens: range toggle (最近7天/最近30天/全部), summary cards (Token 用量 / 输入 / 输出 / 活跃天数), per-day breakdown table with activity bars; the previous scaffolded sidebar and "coming soon" placeholders were removed
+- **In-app update check** (设置菜单与统计页的“检查更新”按钮): compares against the latest GitHub release, downloads the NSIS installer with progress, and hands off to the installer after quitting
+- Daily counters now persist the merged token fields alongside the HTTP-derived request/message/session counters
+
+### Changed
+
+- The statistics page no longer scaffolds future settings sections; it shows only what works today
+
+## [0.2.0] - 2026-08-16
+
+### Added
+
+- Per-day usage recording with no retention limit: every `POST /api/*` call the GUI makes is folded into daily counters (requests, messages, sessions, sub-agent prompts) and persisted forever in `usage.json` under the app data directory
+- App-owned settings window (菜单 设置 → 使用统计, `Ctrl+,`) with a ZCode-style dark layout and a per-day 每日用量 table that live-updates while the window is open
+- The harness's own boot-time `workspace.*` calls are excluded as internal plumbing
+- Headless smoke test now also opens the settings window and asserts it paints over the usage IPC bridge
+
 ## [0.1.0] - 2026-08-14
 
 Initial release.
@@ -13,6 +37,7 @@ Initial release.
 - Single-instance lock, window bounds persistence, external-link handoff to the system browser
 - Loading screen during server boot and a restart dialog on unexpected server exit
 - Controlled server lifecycle: quitting the app stops the local server
+- Skills & Plugins menu: open skill directories, edit the web profile's `cordis.patch.yml`, open the plugin directory, and restart the server
 - Headless smoke test (`npm run smoke`) covering server start, boot-manifest injection, and UI paint
 - GitHub Actions release workflow (Windows NSIS/portable zip, Linux AppImage, macOS DMG/zip)
 

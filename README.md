@@ -18,12 +18,14 @@ A native desktop wrapper for DeepSeek Harness, built with Electron.
 
 - Native window with the official DeepSeek whale icon (taskbar, window, installer)
 - Same web GUI as `dsh web` — every feature, plugin, and session works identically
+- Skills & Plugins menu: open the user/AGENTS skill directories, edit the web profile's `cordis.patch.yml`, open the plugin directory, and restart the server to load changes
 - Single-instance lock; launching again focuses the existing window
 - Remembers window size/position across restarts
 - External links open in your system browser, never inside the app
 - Loading screen while the local server boots; restart dialog if it ever dies
 - Quitting the app stops the local server (sessions persist per event)
 - Standard application menu (Edit/View/Window roles, project links, About)
+- App-owned usage statistics (设置 → 使用统计, `Ctrl+,`): exact token usage (input/output/cache) parsed from the harness session logs, per calendar day, kept forever with no retention limit — plus an in-app 检查更新 button that downloads and installs newer GitHub releases
 
 **Usage**
 
@@ -39,6 +41,7 @@ npm install
 npm run icons   # regenerate icons from assets/icon-src/appstore-512.jpg
 npm start       # build + run from source
 npm run smoke   # headless end-to-end check (server, boot manifest, UI paint)
+npm run verify  # typecheck + build + smoke in one pass
 ```
 
 **Packaging**
@@ -61,12 +64,14 @@ DeepSeek Harness 的原生桌面端，基于 Electron 构建。
 
 - 原生窗口，图标为 DeepSeek 官方鲸鱼标志（任务栏、窗口、安装包）
 - 与 `dsh web` 完全相同的 Web GUI —— 所有功能、插件与会话行为一致
+- “技能与插件”菜单：打开用户/AGENTS 技能目录、编辑 web 配置文件的 `cordis.patch.yml`、打开插件目录，并可重启服务加载新配置
 - 单实例锁：重复启动会聚焦已有窗口
 - 记住窗口大小与位置
 - 外部链接在系统浏览器打开，不会劫持应用窗口
 - 本地服务启动期间显示加载页；服务意外退出时提供重启对话框
 - 退出应用即停止本地服务（会话按事件持久化，不丢失）
 - 标准应用菜单（编辑/视图/窗口角色、项目链接、关于）
+- 应用自有的用量统计（设置 → 使用统计，`Ctrl+,`）：从本地会话日志精确解析 Token 用量（输入/输出/缓存），按天记录、永久保存无时间限制；设置页内置"检查更新"按钮，可自动下载并安装 GitHub 上的新版本
 
 **使用**
 
@@ -82,6 +87,7 @@ npm install
 npm run icons   # 从 assets/icon-src/appstore-512.jpg 重新生成图标
 npm start       # 构建并从源码运行
 npm run smoke   # 无头端到端检查（服务、启动清单、UI 渲染）
+npm run verify  # 一键执行类型检查、构建与冒烟测试
 ```
 
 **打包**
@@ -102,8 +108,9 @@ npm run dist:mac     # DMG + zip
 
 ## Roadmap / 路线图
 
+- [ ] Standalone UI: gradually replace the hosted web GUI with the app's own interface (settings pane is the first step), driven by the harness engine underneath / 独立界面：逐步以应用自有的界面取代承载的 Web GUI（设置页是第一步），底层仍由 harness 引擎驱动
 - [ ] Tray icon with quick actions / 托盘图标与快捷操作
-- [ ] Auto-update (electron-updater) / 自动更新
+- [ ] Auto-update on startup (currently a manual 检查更新 button) / 启动时自动检查更新（当前为手动按钮）
 - [ ] macOS/Linux verification pass / macOS/Linux 验证
 
 ## License / 开源协议

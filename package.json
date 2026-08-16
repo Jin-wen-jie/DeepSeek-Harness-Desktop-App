@@ -1,7 +1,7 @@
 {
   "name": "deepseek-harness-desktop",
   "productName": "DeepSeek Harness",
-  "version": "0.1.0",
+  "version": "0.3.0",
   "description": "Unofficial desktop shell for DeepSeek Harness: a native window around the local dsh web server.",
   "license": "MIT",
   "author": {
@@ -23,11 +23,13 @@
     "build": "tsc -p tsconfig.json",
     "typecheck": "tsc -p tsconfig.json --noEmit",
     "icons": "node scripts/generate-icons.mjs",
+    "postinstall": "node scripts/patch-dsh.mjs",
     "dist": "npm run build && electron-builder",
     "dist:win": "npm run build && electron-builder --win && node scripts/verify-packaged.mjs",
     "dist:linux": "npm run build && electron-builder --linux && node scripts/verify-packaged.mjs release/linux-unpacked/resources/app",
     "dist:mac": "npm run build && electron-builder --mac && node scripts/verify-packaged.mjs release/mac/DeepSeek Harness.app/Contents/Resources/app",
-    "smoke": "npm run build && node scripts/smoke.mjs"
+    "smoke": "npm run build && node scripts/smoke.mjs",
+    "verify": "npm run typecheck && npm run build && npm run smoke"
   },
   "dependencies": {
     "@deepseek-ai/cordis-plugin-group": "^1.0.1",

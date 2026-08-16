@@ -1,17 +1,28 @@
 /**
  * Electron entry: boots the DeepSeek Harness web server as a child process
  * and hosts the official web GUI in a native window. The whale icon, single
- * instance lock, window-state memory, an application menu, and a controlled
+ * instance lock, window-state memory, an application menu with skills/plugins shortcuts, and a controlled
  * server lifecycle are the only additions over `dsh web` in a browser.
  * @module main
  */
 
 import { app, BrowserWindow, dialog, Menu, shell } from 'electron'
 import type { BrowserWindowConstructorOptions, MenuItemConstructorOptions } from 'electron'
-import { appendFileSync, mkdirSync, readFileSync, writeFileSync } from 'node:fs'
-import { join } from 'node:path'
+import { appendFileSync, existsSync, mkdirSync, readFileSync, writeFileSync } from 'node:fs'
+import { dirname, join } from 'node:path'
 import { createRequire } from 'node:module'
 import { startHarnessServer, resolveDshBinPath, type HarnessExitInfo, type HarnessServer } from './harness.js'
+import {
+  resolveAgentsSkillsDir,
+  resolveHomePatchFile,
+  resolveDshHome,
+  resolveProfileDir,
+  resolveProfilePatchFile,
+  resolveUserSkillsDir,
+} from './dsh-paths.js'
+import { startUsageTracking, type UsageController } from './usage-main.js'
+import { openSettingsWindow } from './settings-window.js'
+import { checkForUpdate, downloadUpdate, installUpdate } from './updater.js'
 
 const APP_ID = 'io.github.jin-wen-jie.deepseek-harness-desktop'
 const HARNESS_PROJECT_URL = 'https://github.com/deepseek-ai/deepseek-harness'
@@ -19,10 +30,21 @@ const DESKTOP_PROJECT_URL = 'https://github.com/Jin-wen-jie/DeepSeek-Harness-Des
 const STARTUP_TIMEOUT_MS = 120_000
 const HTTP_READY_TIMEOUT_MS = 30_000
 const SMOKE = process.env.DSH_DESKTOP_SMOKE === '1'
+const PROFILE_PATCH_TEMPLATE = `# Your patch layer for this dsh profile, applied after every bundle layer:
+# a top-level YAML array of loader patch entries (id-targeted config
+# overrides, disables, and insert lists; \`!!js\` expressions allowed).
+[]
+`
+const HOME_PATCH_TEMPLATE = `# Your home-level patch layer, applied after every profile patch layer:
+# a top-level YAML array of loader patch entries (id-targeted config
+# overrides, disables, and insert lists; \`!!js\` expressions allowed).
+[]
+`
 
 let mainWindow: BrowserWindow | null = null
 let server: HarnessServer | null = null
 let pendingServer: Promise<HarnessServer> | null = null
+let usageController: UsageController | null = null
 let quitting = false
 
 const sleep = (ms: number): Promise<void> => new Promise(resolve => setTimeout(resolve, ms))
@@ -198,6 +220,83 @@ async function waitForHttp(url: string, timeoutMs = HTTP_READY_TIMEOUT_MS): Prom
   throw new Error(`Server did not answer HTTP at ${url}: ${String(lastError)}`)
 }
 
+/**
+ * Load the harness GUI with a timeout and retry. The dsh GUI boot can stall
+ * once while the shared profile dependency set (~/.dsh/profiles/node_modules)
+ * initializes — without this watchdog the window would sit on the loading
+ * page forever with no recovery.
+ * @param window - the main window (no-op when closed).
+ * @param url - the ready harness origin.
+ */
+async function loadGui(window: BrowserWindow | null, url: string): Promise<void> {
+  if (window === null) return
+  const LOAD_TIMEOUT_MS = 20_000
+  const MAX_ATTEMPTS = 3
+  for (let attempt = 1; attempt <= MAX_ATTEMPTS; attempt++) {
+    try {
+      await withTimeout(window.loadURL(url), LOAD_TIMEOUT_MS, 'GUI load attempt ' + attempt + ' timed out after ' + LOAD_TIMEOUT_MS + ' ms')
+      return
+    } catch (error) {
+      log('GUI load attempt ' + attempt + '/' + MAX_ATTEMPTS + ' failed: ' + String(error))
+      if (attempt < MAX_ATTEMPTS) await sleep(1_500)
+    }
+  }
+  throw new Error('GUI failed to load after ' + MAX_ATTEMPTS + ' attempts')
+}
+
+/** Settle a promise or reject with a timeout — a hung load must not pin the window. */
+function withTimeout<T>(promise: Promise<T>, ms: number, message: string): Promise<T> {
+  return new Promise((resolve, reject) => {
+    const timer = setTimeout(() => reject(new Error(message)), ms)
+    promise.then(
+      value => { clearTimeout(timer); resolve(value) },
+      error => { clearTimeout(timer); reject(error) },
+    )
+  })
+}
+
+/**
+ * One unary workspace RPC against the harness origin, using the same
+ * envelope the web client speaks (POST /api/<method>).
+ * @param base - the ready harness origin.
+ * @param method - the wire method name (workspace.*).
+ * @param payload - the business request payload.
+ * @returns the ok value of the response.
+ */
+async function workspaceRpc(base: string, method: string, payload: Record<string, unknown>): Promise<unknown> {
+  const rpcId = `desktop-${Date.now().toString(36)}-${Math.random().toString(36).slice(2, 10)}`
+  const response = await fetch(`${base}/api/${method}`, {
+    method: 'POST',
+    headers: { 'content-type': 'application/json' },
+    body: JSON.stringify({ type: 'client-request', rpcId, method, payload }),
+  })
+  if (!response.ok) throw new Error(`${method}: HTTP ${response.status}`)
+  const envelope = await response.json() as { result?: { ok?: boolean; value?: unknown; error?: unknown } }
+  const result = envelope.result
+  if (result?.ok !== true) {
+    throw new Error(`${method} rejected: ${JSON.stringify(result?.error ?? envelope)}`)
+  }
+  return result.value
+}
+
+/**
+ * Ensure the pinned “任务” (Tasks) workspace exists at the bottom of the
+ * sidebar: a real workspace over an app-owned directory, so sessions started
+ * under it auto-account. Idempotent — workspace.create resolves the existing
+ * record for the same canonical path.
+ * @param url - the ready harness origin.
+ */
+async function ensureTasksWorkspace(url: string): Promise<void> {
+  const tasksDir = join(dataDir(), 'tasks')
+  mkdirSync(tasksDir, { recursive: true })
+  const created = await workspaceRpc(url, 'workspace.create', { path: tasksDir }) as { workspace?: { workspaceId?: string } }
+  const workspaceId = created?.workspace?.workspaceId
+  if (workspaceId === undefined) throw new Error('workspace.create returned no workspace id')
+  await workspaceRpc(url, 'workspace.rename', { workspaceId, title: '任务' })
+  // Append to the end of the durable order (omitted anchor = append).
+  await workspaceRpc(url, 'workspace.insertBefore', { workspaceId })
+}
+
 /** Offer a restart after a failed start or an unexpected server exit. */
 function offerRecovery(kind: 'startup' | 'crash', detail: string): void {
   const message = kind === 'startup' ? 'DeepSeek Harness 本地服务启动失败' : 'DeepSeek Harness 本地服务已退出'
@@ -240,7 +339,14 @@ async function launch(): Promise<void> {
       server = running
       log(`server ready: ${running.url}`)
       await waitForHttp(running.url)
-      await mainWindow?.loadURL(running.url)
+      // Best-effort: the pinned Tasks workspace is cosmetic, so a failure
+      // must never block the GUI from loading.
+      try {
+        await ensureTasksWorkspace(running.url)
+      } catch (error) {
+        log('tasks workspace setup failed: ' + String(error))
+      }
+      await loadGui(mainWindow, running.url)
     } catch (error) {
       server = null
       const detail = error instanceof Error ? error.message : String(error)
@@ -266,13 +372,193 @@ function harnessVersion(): string {
   }
 }
 
-/** Application menu: standard roles plus project links. */
+/**
+ * Prepare and open a filesystem path, then surface any shell error.
+ * @param path - absolute file or directory path to reveal.
+ * @param prepare - synchronous step that creates missing directories/files.
+ * @param title - user-facing name shown in error dialogs.
+ */
+async function revealPath(path: string, prepare: () => void, title: string): Promise<void> {
+  try {
+    prepare()
+    const error = await shell.openPath(path)
+    if (error !== '') {
+      await dialog.showMessageBox({ type: 'error', title, message: `无法打开：${title}`, detail: error })
+    }
+  } catch (error) {
+    await dialog.showMessageBox({ type: 'error', title, message: `无法打开：${title}`, detail: String(error) })
+  }
+}
+
+/** Open the user-level dsh skills directory, creating it when absent. */
+async function openUserSkillsDir(): Promise<void> {
+  const path = resolveUserSkillsDir()
+  await revealPath(path, () => mkdirSync(path, { recursive: true }), '用户技能目录')
+}
+
+/** Open the user-level AGENTS skills directory, creating it when absent. */
+async function openAgentsSkillsDir(): Promise<void> {
+  const path = resolveAgentsSkillsDir()
+  await revealPath(path, () => mkdirSync(path, { recursive: true }), 'AGENTS 技能目录')
+}
+
+/** Open the booted web profile directory, creating it when absent. */
+async function openProfileDir(): Promise<void> {
+  const path = resolveProfileDir()
+  await revealPath(path, () => mkdirSync(path, { recursive: true }), '插件目录')
+}
+
+/** Open the web profile's cordis.patch.yml in the default editor, creating it when absent. */
+async function openProfilePatchFile(): Promise<void> {
+  const path = resolveProfilePatchFile()
+  await revealPath(path, () => {
+    mkdirSync(dirname(path), { recursive: true })
+    if (!existsSync(path)) writeFileSync(path, PROFILE_PATCH_TEMPLATE)
+  }, '插件配置文件')
+}
+
+/** Open the home-level cordis.patch.yml applied to every profile. */
+async function openHomePatchFile(): Promise<void> {
+  const path = resolveHomePatchFile()
+  await revealPath(path, () => {
+    mkdirSync(dirname(path), { recursive: true })
+    if (!existsSync(path)) writeFileSync(path, HOME_PATCH_TEMPLATE)
+  }, '全局插件配置文件')
+}
+
+/** Explain where skills and plugins live, then offer the two most common actions. */
+async function showSkillsPluginsHelp(): Promise<void> {
+  const { response } = await dialog.showMessageBox({
+    type: 'info',
+    title: '技能与插件',
+    message: 'DeepSeek Harness 通过目录和补丁文件加载技能与插件',
+    detail: [
+      '技能（Skills）',
+      `  用户级（dsh）：${resolveUserSkillsDir()}`,
+      `  用户级（AGENTS）：${resolveAgentsSkillsDir()}`,
+      '  项目级：<项目根>/.dsh/skills 或 <项目根>/.agents/skills',
+      '  形式：目录 <name>/SKILL.md，或单文件 <name>.md',
+      '',
+      '插件（Plugins）',
+      `  数据根目录：${resolveDshHome()}`,
+      `  补丁文件：${resolveProfilePatchFile()}`,
+        `  全局补丁文件：${resolveHomePatchFile()}`,
+      `  插件目录：${resolveProfileDir()}`,
+      '  本机安装 npm 插件包：dsh plugin --profile web add <package>',
+      '',
+      '修改后请使用“重启服务”菜单加载新配置。',
+    ].join('\n'),
+    buttons: ['打开用户技能目录', '编辑插件配置', '关闭'],
+    defaultId: 0,
+    cancelId: 2,
+  })
+  if (response === 0) await openUserSkillsDir()
+  if (response === 1) await openProfilePatchFile()
+}
+
+/** Restart the running harness after skill or plugin configuration changed. */
+async function restartHarness(): Promise<void> {
+  if (quitting) return
+  if (pendingServer !== null) {
+    await dialog.showMessageBox({ type: 'warning', title: '重启服务', message: '本地服务正在启动中，请稍候再试。' })
+    return
+  }
+  if (server === null) {
+    const detail = pendingServer === null
+      ? '请等待本地服务启动完成后再试。'
+      : '本地服务正在启动中，请稍候再试。'
+    await dialog.showMessageBox({ type: 'warning', title: '重启服务', message: '服务尚未启动，无法重启。', detail })
+    return
+  }
+  const running = server
+  server = null
+  await running.stop()
+  await launch()
+}
+
+/** Open (or focus) the app's own settings window with the usage stats page. */
+function openSettings(): void {
+  if (usageController === null) return
+  openSettingsWindow({ controller: usageController, iconPath: iconPath(), parent: mainWindow })
+}
+
+/** Reveal the durable usage store in the system file manager. */
+async function openUsageDataFile(): Promise<void> {
+  if (usageController === null) return
+  usageController.flush()
+  shell.showItemInFolder(usageController.filePath)
+}
+
+/** Menu flow for 检查更新: check, offer download, install, restart. */
+async function checkUpdateFromMenu(): Promise<void> {
+  const result = await checkForUpdate()
+  if (result.status === 'error') {
+    await dialog.showMessageBox({ type: 'warning', title: '检查更新', message: result.error ?? '检查更新失败。' })
+    return
+  }
+  if (!result.hasUpdate) {
+    await dialog.showMessageBox({ type: 'info', title: '检查更新', message: `当前已是最新版本 v${result.current}。` })
+    return
+  }
+  const { response } = await dialog.showMessageBox({
+    type: 'info',
+    title: '发现新版本',
+    message: `发现新版本 v${result.latest ?? result.current}（当前 v${result.current}）`,
+    detail: '是否下载并安装？下载完成后将自动退出并启动安装程序。',
+    buttons: ['下载并安装', '稍后'],
+    defaultId: 0,
+    cancelId: 1,
+  })
+  if (response !== 0 || result.assetUrl === null) return
+  try {
+    const installerPath = await downloadUpdate(result.assetUrl)
+    await dialog.showMessageBox({
+      type: 'info',
+      title: '下载完成',
+      message: '更新包已下载，点击确定后将退出应用并启动安装程序。',
+    })
+    installUpdate(installerPath)
+  } catch (error) {
+    await dialog.showMessageBox({
+      type: 'error',
+      title: '下载失败',
+      message: error instanceof Error ? error.message : String(error),
+    })
+  }
+}
+
+/** Application menu: standard roles, skills/plugins shortcuts, and project links. */
 function buildMenu(): void {
   const template: MenuItemConstructorOptions[] = [
     { role: 'fileMenu' },
     { role: 'editMenu' },
     { role: 'viewMenu' },
     { role: 'windowMenu' },
+      {
+        label: '技能与插件',
+        submenu: [
+          { label: '技能与插件说明', click: () => void showSkillsPluginsHelp() },
+          { type: 'separator' },
+          { label: '打开用户技能目录', click: () => void openUserSkillsDir() },
+          { label: '打开 AGENTS 技能目录', click: () => void openAgentsSkillsDir() },
+          { type: 'separator' },
+          { label: '编辑插件配置', click: () => void openProfilePatchFile() },
+            { label: '编辑全局插件配置', click: () => void openHomePatchFile() },
+          { label: '打开插件目录', click: () => void openProfileDir() },
+          { type: 'separator' },
+          { label: '重启服务以加载技能/插件', click: () => void restartHarness() },
+        ],
+      },
+      {
+        label: '设置',
+        submenu: [
+          { label: '使用统计…', accelerator: 'CmdOrCtrl+,', click: () => openSettings() },
+          { label: '检查更新…', click: () => void checkUpdateFromMenu() },
+          { type: 'separator' },
+          { label: '打开数据目录', click: () => void usageController?.openDataDir() },
+          { label: '打开用量数据文件', click: () => void openUsageDataFile() },
+        ],
+      },
     {
       role: 'help',
       submenu: [
@@ -322,6 +608,21 @@ async function runSmoke(): Promise<void> {
     } finally {
       probe.destroy()
     }
+    // The app's own settings window must paint and talk to the usage IPC.
+    if (usageController !== null) {
+      const settings = openSettingsWindow({ controller: usageController, iconPath: iconPath(), parent: null, visible: false })
+      try {
+        await new Promise<void>((resolve) => settings.webContents.once('did-finish-load', () => resolve()))
+        await sleep(1_500)
+        const painted: boolean = await settings.webContents.executeJavaScript(
+          'document.body.innerText.includes("使用统计") && document.body.innerText.includes("每日用量")',
+        )
+        if (!painted) throw new Error('settings page did not paint')
+        console.log('DSH_DESKTOP_SMOKE settings page ok')
+      } finally {
+        settings.destroy()
+      }
+    }
     console.log(`DSH_DESKTOP_SMOKE_OK url=${server.url}`)
     clearTimeout(timeout)
     await server.stop()
@@ -350,6 +651,14 @@ if (!gotLock) {
   if (process.platform === 'win32') app.setAppUserModelId(APP_ID)
 
   void app.whenReady().then(() => {
+    // Usage tracking runs for the whole app lifetime; the observer is
+    // skipped in headless smoke mode so probe traffic never touches the
+    // real store. Token accounting is scanned from the harness session logs.
+    usageController = startUsageTracking({
+      dataDir: dataDir(),
+      sessionsDir: join(resolveDshHome(), 'sessions'),
+      observe: !SMOKE,
+    })
     buildMenu()
     if (SMOKE) void runSmoke()
     else void launch()
@@ -359,13 +668,16 @@ if (!gotLock) {
     if (BrowserWindow.getAllWindows().length === 0 && !SMOKE && !quitting) void launch()
   })
   app.on('window-all-closed', () => {
-    if (process.platform !== 'darwin') app.quit()
+    // In smoke mode runSmoke owns the lifecycle; quitting here races the
+    // DSH_DESKTOP_SMOKE_OK report and swallows it.
+    if (process.platform !== 'darwin' && !SMOKE) app.quit()
   })
 
   app.on('before-quit', () => { quitting = true })
 
   let serverStopped = false
   app.on('will-quit', (event) => {
+    usageController?.flush()
     if (serverStopped) return
     event.preventDefault()
     serverStopped = true

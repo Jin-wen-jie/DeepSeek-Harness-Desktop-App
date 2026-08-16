@@ -55,4 +55,33 @@ if (missing.length > 0) {
   for (const rel of missing) console.error('  - ' + rel)
   process.exit(1)
 }
+
+// The folder-picker worker must not ship the koffi.view()-based readUtf16:
+// koffi.view() fatals under Electron-as-node (napi_fatal_error), crashing
+// the worker process the moment a folder is picked. The postinstall patch
+// (scripts/patch-dsh.mjs) rewrites it; fail the release if the packaged
+// worker still carries the buggy read.
+const workerPath = join(packagedModules, '@deepseek-ai', 'dsh-host-directory-picker-native', 'lib', 'worker.cjs')
+if (existsSync(workerPath)) {
+  const worker = readFileSync(workerPath, 'utf8')
+  if (worker.includes('koffi.view(address, 32768)')) {
+    console.error('Packaged worker.cjs still uses koffi.view() — the folder picker crashes under Electron-as-node.')
+    console.error('Reinstall dependencies (npm install) to run the postinstall patch, then rebuild.')
+    process.exit(1)
+  }
+}
+
+// Deleting a workspace must permanently delete its sessions, not drop them
+// into the ungrouped bucket. The postinstall patch (scripts/patch-dsh.mjs)
+// rewrites deleteKnown; fail the release if the packaged registry lacks it.
+const workspacePath = join(packagedModules, '@deepseek-ai', 'dsh-workspace', 'lib', 'index.js')
+if (existsSync(workspacePath)) {
+  const workspace = readFileSync(workspacePath, 'utf8')
+  if (!workspace.includes('permanently deletes every session it accounted')) {
+    console.error('Packaged dsh-workspace lacks the delete-sessions patch — workspace conversations would fall into the ungrouped bucket.')
+    console.error('Reinstall dependencies (npm install) to run the postinstall patch, then rebuild.')
+    process.exit(1)
+  }
+}
+
 console.log('OK: packaged app contains all ' + seen.size + ' packages of the production closure')
