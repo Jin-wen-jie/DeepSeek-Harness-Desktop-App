@@ -1,0 +1,10 @@
+node_modules/
+dist/
+release/
+build/icon.ico
+build/icon.png
+build/icon-1024.png
+assets/icon.png
+assets/icon.ico
+*.log
+.DS_Store

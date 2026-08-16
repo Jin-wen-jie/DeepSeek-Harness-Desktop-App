@@ -1,0 +1,41 @@
+appId: io.github.jin-wen-jie.deepseek-harness-desktop
+productName: DeepSeek Harness
+copyright: Copyright © 2026 Jin-wen-jie and contributors
+# The bundled dsh CLI runs with ELECTRON_RUN_AS_NODE, so plain files beat an asar archive.
+asar: false
+npmRebuild: false
+directories:
+  output: release
+  buildResources: build
+files:
+  - dist/**
+  - package.json
+  - assets/icon.png
+  - assets/icon.ico
+  - "!assets/icon-src/**"
+win:
+  icon: build/icon.ico
+  target:
+    - nsis
+    - portable
+nsis:
+  oneClick: false
+  allowToChangeInstallationDirectory: true
+  createDesktopShortcut: true
+  createStartMenuShortcut: true
+  shortcutName: DeepSeek Harness
+  artifactName: DeepSeek-Harness-Setup-${version}.${ext}
+portable:
+  artifactName: DeepSeek-Harness-Portable-${version}.${ext}
+linux:
+  icon: build/icon.png
+  target:
+    - AppImage
+  category: Development
+mac:
+  icon: build/icon.png
+  category: public.app-category.developer-tools
+  target:
+    - dmg
+    - zip
+publish: null

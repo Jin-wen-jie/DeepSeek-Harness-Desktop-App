@@ -1,0 +1,51 @@
+{
+  "name": "deepseek-harness-desktop",
+  "productName": "DeepSeek Harness",
+  "version": "0.1.0",
+  "description": "Unofficial desktop shell for DeepSeek Harness: a native window around the local dsh web server.",
+  "license": "MIT",
+  "author": {
+    "name": "Jin-wen-jie",
+    "url": "https://github.com/Jin-wen-jie"
+  },
+  "homepage": "https://github.com/Jin-wen-jie/DeepSeek-Harness-Desktop-App",
+  "repository": {
+    "type": "git",
+    "url": "https://github.com/Jin-wen-jie/DeepSeek-Harness-Desktop-App.git"
+  },
+  "type": "module",
+  "main": "dist/main.js",
+  "engines": {
+    "node": ">=24.0.0"
+  },
+  "scripts": {
+    "start": "npm run build && electron .",
+    "build": "tsc -p tsconfig.json",
+    "typecheck": "tsc -p tsconfig.json --noEmit",
+    "icons": "node scripts/generate-icons.mjs",
+    "dist": "npm run build && electron-builder",
+    "dist:win": "npm run build && electron-builder --win",
+    "dist:linux": "npm run build && electron-builder --linux",
+    "dist:mac": "npm run build && electron-builder --mac",
+    "smoke": "npm run build && node scripts/smoke.mjs"
+  },
+  "dependencies": {
+    "@deepseek-ai/dsh": "0.1.0-rc.6"
+  },
+  "devDependencies": {
+    "@types/node": "^24.0.0",
+    "electron": "43.4.0",
+    "electron-builder": "^26.15.3",
+    "png-to-ico": "^3.0.2",
+    "sharp": "^0.35.3",
+    "typescript": "~7.0.2"
+  },
+  "allowScripts": {
+    "@deepseek-ai/dsh-subprocess-local@0.1.0-rc.6": true,
+    "@google/genai@1.52.0": true,
+    "electron-winstaller@5.4.0": true,
+    "koffi@3.1.5": true,
+    "node-pty@1.1.0": true,
+    "protobufjs@7.6.5": true
+  }
+}
