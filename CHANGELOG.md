@@ -2,6 +2,18 @@
 
 All notable changes to this project are documented in this file. The format follows [Keep a Changelog](https://keepachangelog.com/en/1.1.0/) and the project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [0.4.0] - 2026-08-17
+
+### Added
+
+- **Chart-based token usage inside the harness GUI**: a “使用统计” pill is injected at the bottom-left of the harness window, docked to the harness's own 设置 trigger, and opens a dark panel with a per-day token **bar chart**, an input/output/cache **donut chart**, range switching (最近7天/最近30天/全部), and summary cards — the update check lives here too
+- The injected overlay is delivered by a sandboxed preload on the main window; all styling goes through CSSOM/SVG attributes so the harness page's CSP never blocks it
+
+### Changed
+
+- Removed the separate settings window and its top-level “设置” menu (the app now surfaces usage and updates inside the harness GUI's bottom-left settings area, as requested)
+- Token donut composition is mutually exclusive (uncached input / cache reads / cache writes / output), so segment percentages sum to 100%
+
 ## [0.3.0] - 2026-08-17
 
 ### Added

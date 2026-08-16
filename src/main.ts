@@ -21,8 +21,7 @@ import {
   resolveUserSkillsDir,
 } from './dsh-paths.js'
 import { startUsageTracking, type UsageController } from './usage-main.js'
-import { openSettingsWindow } from './settings-window.js'
-import { checkForUpdate, downloadUpdate, installUpdate } from './updater.js'
+import { registerSettingsIpc } from './settings-ipc.js'
 
 const APP_ID = 'io.github.jin-wen-jie.deepseek-harness-desktop'
 const HARNESS_PROJECT_URL = 'https://github.com/deepseek-ai/deepseek-harness'
@@ -171,6 +170,9 @@ function createWindow(initialPage: string): BrowserWindow {
     backgroundColor: '#0d1117',
     title: 'DeepSeek Harness',
     webPreferences: {
+      // Injects the 使用统计 overlay into the harness GUI (bottom-left,
+      // docked to its settings trigger). Sandboxed preload — CommonJS only.
+      preload: join(app.getAppPath(), 'dist', 'gui-usage-preload.cjs'),
       contextIsolation: true,
       nodeIntegration: false,
       sandbox: true,
@@ -476,57 +478,6 @@ async function restartHarness(): Promise<void> {
   await launch()
 }
 
-/** Open (or focus) the app's own settings window with the usage stats page. */
-function openSettings(): void {
-  if (usageController === null) return
-  openSettingsWindow({ controller: usageController, iconPath: iconPath(), parent: mainWindow })
-}
-
-/** Reveal the durable usage store in the system file manager. */
-async function openUsageDataFile(): Promise<void> {
-  if (usageController === null) return
-  usageController.flush()
-  shell.showItemInFolder(usageController.filePath)
-}
-
-/** Menu flow for 检查更新: check, offer download, install, restart. */
-async function checkUpdateFromMenu(): Promise<void> {
-  const result = await checkForUpdate()
-  if (result.status === 'error') {
-    await dialog.showMessageBox({ type: 'warning', title: '检查更新', message: result.error ?? '检查更新失败。' })
-    return
-  }
-  if (!result.hasUpdate) {
-    await dialog.showMessageBox({ type: 'info', title: '检查更新', message: `当前已是最新版本 v${result.current}。` })
-    return
-  }
-  const { response } = await dialog.showMessageBox({
-    type: 'info',
-    title: '发现新版本',
-    message: `发现新版本 v${result.latest ?? result.current}（当前 v${result.current}）`,
-    detail: '是否下载并安装？下载完成后将自动退出并启动安装程序。',
-    buttons: ['下载并安装', '稍后'],
-    defaultId: 0,
-    cancelId: 1,
-  })
-  if (response !== 0 || result.assetUrl === null) return
-  try {
-    const installerPath = await downloadUpdate(result.assetUrl)
-    await dialog.showMessageBox({
-      type: 'info',
-      title: '下载完成',
-      message: '更新包已下载，点击确定后将退出应用并启动安装程序。',
-    })
-    installUpdate(installerPath)
-  } catch (error) {
-    await dialog.showMessageBox({
-      type: 'error',
-      title: '下载失败',
-      message: error instanceof Error ? error.message : String(error),
-    })
-  }
-}
-
 /** Application menu: standard roles, skills/plugins shortcuts, and project links. */
 function buildMenu(): void {
   const template: MenuItemConstructorOptions[] = [
@@ -547,16 +498,6 @@ function buildMenu(): void {
           { label: '打开插件目录', click: () => void openProfileDir() },
           { type: 'separator' },
           { label: '重启服务以加载技能/插件', click: () => void restartHarness() },
-        ],
-      },
-      {
-        label: '设置',
-        submenu: [
-          { label: '使用统计…', accelerator: 'CmdOrCtrl+,', click: () => openSettings() },
-          { label: '检查更新…', click: () => void checkUpdateFromMenu() },
-          { type: 'separator' },
-          { label: '打开数据目录', click: () => void usageController?.openDataDir() },
-          { label: '打开用量数据文件', click: () => void openUsageDataFile() },
         ],
       },
     {
@@ -597,7 +538,7 @@ async function runSmoke(): Promise<void> {
       onLine: line => console.log('[dsh]', line),
       timeoutMs: STARTUP_TIMEOUT_MS,
     })
-    const probe = new BrowserWindow({ show: false, webPreferences: { sandbox: true, contextIsolation: true } })
+    const probe = new BrowserWindow({ show: false, webPreferences: { sandbox: true, contextIsolation: true, preload: join(app.getAppPath(), 'dist', 'gui-usage-preload.cjs') } })
     try {
       await probe.loadURL(server.url)
       const hasBoot: boolean = await probe.webContents.executeJavaScript('Boolean(window.__DSH_BOOT__)')
@@ -605,23 +546,31 @@ async function runSmoke(): Promise<void> {
       await sleep(15_000)
       const textLength: number = await probe.webContents.executeJavaScript('document.body ? document.body.innerText.length : 0')
       if (textLength < 50) throw new Error(`UI did not render (body text length ${textLength})`)
+      // The preload must inject the usage overlay and its charts render.
+      const overlay = await probe.webContents.executeJavaScript(`
+        (function () {
+          var root = document.getElementById('dsh-desktop-usage-root')
+          if (!root) return 'NO_ROOT'
+          var entry = root.querySelector('button')
+          if (!entry) return 'NO_ENTRY'
+          entry.click()
+          return new Promise(function (resolve) {
+            setTimeout(function () {
+              resolve({
+                barBars: root.querySelectorAll('svg rect').length,
+                donutCircles: root.querySelectorAll('svg circle').length,
+                hasUpdateText: root.textContent.indexOf('使用统计') >= 0,
+              })
+            }, 1500)
+          })
+        })()
+      `)
+      if (typeof overlay === 'string' || (overlay as { barBars?: number }).barBars === undefined || (overlay as { barBars: number }).barBars === 0) {
+        throw new Error('usage overlay did not render: ' + JSON.stringify(overlay))
+      }
+      console.log('DSH_DESKTOP_SMOKE usage overlay ok', JSON.stringify(overlay))
     } finally {
       probe.destroy()
-    }
-    // The app's own settings window must paint and talk to the usage IPC.
-    if (usageController !== null) {
-      const settings = openSettingsWindow({ controller: usageController, iconPath: iconPath(), parent: null, visible: false })
-      try {
-        await new Promise<void>((resolve) => settings.webContents.once('did-finish-load', () => resolve()))
-        await sleep(1_500)
-        const painted: boolean = await settings.webContents.executeJavaScript(
-          'document.body.innerText.includes("使用统计") && document.body.innerText.includes("每日用量")',
-        )
-        if (!painted) throw new Error('settings page did not paint')
-        console.log('DSH_DESKTOP_SMOKE settings page ok')
-      } finally {
-        settings.destroy()
-      }
     }
     console.log(`DSH_DESKTOP_SMOKE_OK url=${server.url}`)
     clearTimeout(timeout)
@@ -659,6 +608,8 @@ if (!gotLock) {
       sessionsDir: join(resolveDshHome(), 'sessions'),
       observe: !SMOKE,
     })
+    // The usage overlay in the harness GUI speaks over this IPC surface.
+    registerSettingsIpc(usageController, () => mainWindow)
     buildMenu()
     if (SMOKE) void runSmoke()
     else void launch()

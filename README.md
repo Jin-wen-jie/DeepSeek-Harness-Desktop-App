@@ -25,7 +25,7 @@ A native desktop wrapper for DeepSeek Harness, built with Electron.
 - Loading screen while the local server boots; restart dialog if it ever dies
 - Quitting the app stops the local server (sessions persist per event)
 - Standard application menu (Edit/View/Window roles, project links, About)
-- App-owned usage statistics (设置 → 使用统计, `Ctrl+,`): exact token usage (input/output/cache) parsed from the harness session logs, per calendar day, kept forever with no retention limit — plus an in-app 检查更新 button that downloads and installs newer GitHub releases
+- Token usage statistics inside the harness GUI (bottom-left “使用统计” pill next to the built-in 设置): per-day token **bar chart** and input/output/cache **donut chart**, parsed from the local session logs, kept forever with no retention limit — plus the in-app 检查更新 that downloads and installs newer GitHub releases
 
 **Usage**
 
@@ -71,7 +71,7 @@ DeepSeek Harness 的原生桌面端，基于 Electron 构建。
 - 本地服务启动期间显示加载页；服务意外退出时提供重启对话框
 - 退出应用即停止本地服务（会话按事件持久化，不丢失）
 - 标准应用菜单（编辑/视图/窗口角色、项目链接、关于）
-- 应用自有的用量统计（设置 → 使用统计，`Ctrl+,`）：从本地会话日志精确解析 Token 用量（输入/输出/缓存），按天记录、永久保存无时间限制；设置页内置"检查更新"按钮，可自动下载并安装 GitHub 上的新版本
+- 主界面内置 Token 用量统计（左下角"使用统计"胶囊按钮，紧挨自带"设置"）：按天 Token **条形图** + 输入/输出/缓存**环形图**，数据从本地会话日志精确解析、永久保留无时间限制；面板里的"检查更新"可自动下载并安装 GitHub 新版本
 
 **使用**
 
