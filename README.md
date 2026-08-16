@@ -44,7 +44,7 @@ npm run smoke   # headless end-to-end check (server, boot manifest, UI paint)
 **Packaging**
 
 ```sh
-npm run dist:win     # NSIS installer + portable exe
+npm run dist:win     # NSIS installer + portable zip
 npm run dist:linux   # AppImage
 npm run dist:mac     # DMG + zip
 ```
@@ -87,7 +87,7 @@ npm run smoke   # 无头端到端检查（服务、启动清单、UI 渲染）
 **打包**
 
 ```sh
-npm run dist:win     # NSIS 安装包 + 便携版 exe
+npm run dist:win     # NSIS 安装包 + 便携版 zip
 npm run dist:linux   # AppImage
 npm run dist:mac     # DMG + zip
 ```

@@ -14,5 +14,5 @@ Initial release.
 - Loading screen during server boot and a restart dialog on unexpected server exit
 - Controlled server lifecycle: quitting the app stops the local server
 - Headless smoke test (`npm run smoke`) covering server start, boot-manifest injection, and UI paint
-- GitHub Actions release workflow (Windows NSIS/portable, Linux AppImage, macOS DMG/zip)
+- GitHub Actions release workflow (Windows NSIS/portable zip, Linux AppImage, macOS DMG/zip)
 
