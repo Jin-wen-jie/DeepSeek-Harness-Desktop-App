@@ -1,28 +1,24 @@
 /**
- * In-app update flow: checks the project's GitHub Releases for a newer
- * version, downloads the Windows NSIS installer, and hands it to the OS.
+ * In-app update flow, powered by electron-updater against the GitHub
+ * release feed.
  *
- * The release workflow publishes installers under the `v*` tag convention
- * (`DeepSeek-Harness-Setup-<version>.exe` for Windows), so the latest
- * release's tag is the version oracle. All network calls carry a timeout and
- * every failure surfaces as a user-readable error — the app must keep
- * working when GitHub is unreachable.
+ * With the NSIS oneClick installer, updates are fully silent: the app
+ * checks GitHub for a newer version (automatically on startup, or on
+ * demand), downloads the new installer in the background, and installs it
+ * without any wizard — on quit when a download finished, or immediately
+ * through the 立即安装 button. The app relaunches itself after install.
+ *
+ * In development (unpackaged) electron-updater has no feed, so the check
+ * surfaces a friendly error instead of failing hard.
  * @module updater
  */
 
-import { spawn } from 'node:child_process'
-import { createWriteStream, existsSync } from 'node:fs'
-import { tmpdir } from 'node:os'
-import { join } from 'node:path'
-import { pipeline } from 'node:stream/promises'
-import { Readable } from 'node:stream'
 import { app } from 'electron'
+// electron-updater exports `autoUpdater` via a lazy defineProperty getter,
+// which ESM named-import analysis cannot see — default-import and destructure.
+import electronUpdater from 'electron-updater'
 
-/** Repository whose releases this app publishes to. */
-const REPO = 'Jin-wen-jie/DeepSeek-Harness-Desktop-App'
-
-/** GitHub API timeout — slow or blocked networks must fail fast, not hang. */
-const FETCH_TIMEOUT_MS = 15_000
+const { autoUpdater } = electronUpdater
 
 /** Outcome of a version check. */
 export interface UpdateCheckResult {
@@ -33,101 +29,87 @@ export interface UpdateCheckResult {
   latest: string | null
   /** Whether a newer version is available. */
   hasUpdate: boolean
-  /** Installer asset file name (Windows). */
-  assetName: string | null
-  /** Installer asset download URL. */
-  assetUrl: string | null
-  /** Installer size in bytes, when the API reports it. */
-  size: number | null
   /** Human-readable failure reason when `status` is `error`. */
   error?: string
 }
 
-/** Compare dotted versions `a` vs `b`; true when `a` is strictly newer. */
-export function isNewerVersion(a: string, b: string): boolean {
-  const pa = a.split('.').map(part => Number(part) || 0)
-  const pb = b.split('.').map(part => Number(part) || 0)
-  for (let i = 0; i < Math.max(pa.length, pb.length); i++) {
-    const da = pa[i] ?? 0
-    const db = pb[i] ?? 0
-    if (da !== db) return da > db
-  }
-  return false
+let initialized = false
+let progressListener: ((fraction: number) => void) | null = null
+
+/** Wire electron-updater once; later calls only refresh the progress hook. */
+function ensureUpdater(onProgress?: (fraction: number) => void): void {
+  progressListener = onProgress ?? null
+  if (initialized) return
+  initialized = true
+  autoUpdater.autoDownload = true
+  autoUpdater.autoInstallOnAppQuit = true
+  autoUpdater.on('download-progress', (progress) => {
+    if (progressListener !== null) progressListener(progress.percent / 100)
+  })
+  autoUpdater.on('error', (error) => {
+    // Errors surface through the check/download promises too; log for the
+    // server log rather than crashing.
+    console.error('auto-update error:', error)
+  })
+}
+
+/** Whether the running app can reach an update feed. */
+function updatable(): boolean {
+  return app.isPackaged
 }
 
 /**
- * Query the latest GitHub release and compare it with the running version.
- * @param repo - `owner/name`; defaults to this project's repository.
+ * Check for a newer release and (with `autoDownload`) start fetching it.
+ * @param onProgress - optional download-progress hook (0..1).
+ * @returns the check outcome; `status: 'error'` with a readable reason
+ *   when the feed is unavailable (dev mode, no network, …).
  */
-export async function checkForUpdate(repo: string = REPO): Promise<UpdateCheckResult> {
+export async function checkForUpdate(onProgress?: (fraction: number) => void): Promise<UpdateCheckResult> {
   const current = app.getVersion()
-  const base = { current, latest: null, hasUpdate: false, assetName: null, assetUrl: null, size: null }
+  if (!updatable()) {
+    return { status: 'error', current, latest: null, hasUpdate: false, error: '开发模式下无法检查更新，请安装正式版后使用。' }
+  }
   try {
-    const response = await fetch(`https://api.github.com/repos/${repo}/releases/latest`, {
-      headers: { 'user-agent': 'DeepSeek-Harness-Desktop', accept: 'application/vnd.github+json' },
-      signal: AbortSignal.timeout(FETCH_TIMEOUT_MS),
-    })
-    if (!response.ok) throw new Error(`GitHub returned HTTP ${response.status}`)
-    const release = await response.json() as {
-      tag_name?: unknown
-      assets?: Array<{ name?: unknown; browser_download_url?: unknown; size?: unknown }>
-    }
-    const tag = typeof release.tag_name === 'string' ? release.tag_name.replace(/^v/, '') : ''
-    if (tag === '') return { ...base, status: 'ok' }
-    const asset = (release.assets ?? []).find(
-      entry => typeof entry.name === 'string' && /^DeepSeek-Harness-Setup-.*\.exe$/.test(entry.name),
-    )
-    return {
-      status: 'ok',
-      current,
-      latest: tag,
-      hasUpdate: isNewerVersion(tag, current),
-      assetName: typeof asset?.name === 'string' ? asset.name : null,
-      assetUrl: typeof asset?.browser_download_url === 'string' ? asset.browser_download_url : null,
-      size: typeof asset?.size === 'number' ? asset.size : null,
-    }
+    ensureUpdater(onProgress)
+    const result = await autoUpdater.checkForUpdates()
+    const latest = result?.updateInfo?.version ?? null
+    return { status: 'ok', current, latest, hasUpdate: latest !== null && latest !== current }
   } catch (error) {
-    const reason = error instanceof Error && error.name === 'TimeoutError'
-      ? '连接 GitHub 超时，请检查网络后重试。'
-      : `检查更新失败：${error instanceof Error ? error.message : String(error)}`
-    return { ...base, status: 'error', error: reason }
+    const reason = error instanceof Error
+      ? (error.message.includes('net::') || error.message.includes('ECONN') || error.message.includes('fetch')
+        ? '无法连接更新服务器，请检查网络后重试。'
+        : error.message)
+      : String(error)
+    return { status: 'error', current, latest: null, hasUpdate: false, error: reason }
   }
 }
 
 /**
- * Download the installer asset to the system temp directory, reporting
- * progress as a percentage when the server sends a content length.
- * @param assetUrl - installer download URL (redirects are followed).
- * @param onProgress - progress callback, 0..1.
- * @returns the local installer path.
+ * Download the pending update (started by {@link checkForUpdate}) and
+ * resolve once it is ready on disk.
+ * @param onProgress - optional download-progress hook (0..1).
+ * @returns a short confirmation message once the update is ready.
  */
-export async function downloadUpdate(assetUrl: string, onProgress?: (fraction: number) => void): Promise<string> {
-  const fileName = assetUrl.split('/').pop() ?? `DeepSeek-Harness-Setup-${app.getVersion()}.exe`
-  const target = join(tmpdir(), fileName)
-  if (!/\.exe$/i.test(fileName)) throw new Error('下载地址不是可执行的安装包。')
-  const response = await fetch(assetUrl, {
-    redirect: 'follow',
-    signal: AbortSignal.timeout(10 * 60_000),
-  })
-  if (!response.ok) throw new Error(`下载失败：HTTP ${response.status}`)
-  const total = Number(response.headers.get('content-length')) || 0
-  let received = 0
-  const body = Readable.fromWeb(response.body as import('node:stream/web').ReadableStream)
-  body.on('data', (chunk: Buffer) => {
-    received += chunk.length
-    if (total > 0) onProgress?.(received / total)
-  })
-  await pipeline(body, createWriteStream(target))
-  if (!existsSync(target)) throw new Error('安装包下载不完整。')
-  return target
+export async function downloadUpdate(onProgress?: (fraction: number) => void): Promise<string> {
+  ensureUpdater(onProgress)
+  // Idempotent: resolves immediately when the update is already downloaded.
+  await autoUpdater.downloadUpdate()
+  return '更新已就绪'
 }
 
 /**
- * Launch the downloaded installer detached and quit the app so the
- * installer can replace the running files.
- * @param installerPath - local installer path from {@link downloadUpdate}.
+ * Install the downloaded update: quit the app, run the oneClick installer
+ * silently, and relaunch the new version.
  */
-export function installUpdate(installerPath: string): void {
-  spawn(installerPath, [], { detached: true, stdio: 'ignore' }).unref()
-  setTimeout(() => app.quit(), 500)
+export function installUpdate(): void {
+  ensureUpdater()
+  autoUpdater.quitAndInstall()
+}
+
+/** Check for updates quietly at startup (packaged app only). */
+export function startAutoCheck(): void {
+  if (!updatable()) return
+  void checkForUpdate().then((result) => {
+    console.log(`auto-update check: ${result.status}${result.hasUpdate ? `, newer ${result.latest} available` : ''}`)
+  }).catch(() => undefined)
 }

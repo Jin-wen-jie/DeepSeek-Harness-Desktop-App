@@ -36,16 +36,13 @@ export function registerSettingsIpc(controller: UsageController, getWindow: () =
   ipcMain.handle('usage:snapshot', (_event, range: unknown) => controller.snapshot(asRange(range)))
   ipcMain.handle('usage:meta', () => ({ filePath: controller.filePath }))
   ipcMain.handle('usage:open-data-dir', () => controller.openDataDir())
-  ipcMain.handle('update:check', () => checkForUpdate())
-  ipcMain.handle('update:download', (_event, assetUrl: unknown) => {
-    if (typeof assetUrl !== 'string') throw new Error('无效的下载地址。')
-    return downloadUpdate(assetUrl, (fraction) => {
-      getWindow()?.webContents.send('update:progress', fraction)
-    })
-  })
-  ipcMain.handle('update:install', (_event, installerPath: unknown) => {
-    if (typeof installerPath !== 'string') throw new Error('无效的安装包路径。')
-    installUpdate(installerPath)
+  const sendProgress = (fraction: number): void => {
+    getWindow()?.webContents.send('update:progress', fraction)
+  }
+  ipcMain.handle('update:check', () => checkForUpdate(sendProgress))
+  ipcMain.handle('update:download', () => downloadUpdate(sendProgress))
+  ipcMain.handle('update:install', () => {
+    installUpdate()
     return { ok: true }
   })
 

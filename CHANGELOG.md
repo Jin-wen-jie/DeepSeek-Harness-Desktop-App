@@ -2,6 +2,17 @@
 
 All notable changes to this project are documented in this file. The format follows [Keep a Changelog](https://keepachangelog.com/en/1.1.0/) and the project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [0.6.0] - 2026-08-17
+
+### Added
+
+- **Silent auto-updates via electron-updater**: the app checks GitHub for newer releases on startup and through the 检查更新 button, downloads the update in the background, and installs it on quit (or immediately via 立即安装) without any installer wizard — the app relaunches itself into the new version
+- The NSIS installer switched to `oneClick: true` (required for silent updates) and the build now publishes the electron-updater feed (`app-update.yml` in the app, `latest.yml` + blockmap on the release)
+
+### Changed
+
+- The update flow no longer spawns a wizard installer; from this version onward, updating is fully automatic
+
 ## [0.5.0] - 2026-08-17
 
 ### Added

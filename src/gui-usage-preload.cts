@@ -71,8 +71,6 @@ const MODEL_COLORS = ['#4da6ff', '#f0883e', '#3fb950', '#a371f7', '#e3b341', '#3
 // ── state ─────────────────────────────────────────────────────────────────
 let range = '7'
 let updateState = 'idle'
-let updateResult: { latest: string | null; assetUrl: string | null; assetName: string | null } | null = null
-let installerPath: string | null = null
 let snapshot: Record<string, unknown> | null = null
 let panelOpen = false
 
@@ -105,15 +103,13 @@ interface UpdateCheckResult {
   latest: string | null
   hasUpdate: boolean
   error?: string
-  assetUrl: string | null
-  assetName: string | null
 }
 const api = {
   meta: (): Promise<{ filePath?: string } | null> => ipcRenderer.invoke('usage:meta') as Promise<{ filePath?: string } | null>,
   openDataDir: (): Promise<unknown> => ipcRenderer.invoke('usage:open-data-dir'),
   checkUpdate: (): Promise<UpdateCheckResult> => ipcRenderer.invoke('update:check') as Promise<UpdateCheckResult>,
-  downloadUpdate: (url: string): Promise<string> => ipcRenderer.invoke('update:download', url) as Promise<string>,
-  installUpdate: (path: string): Promise<unknown> => ipcRenderer.invoke('update:install', path),
+  downloadUpdate: (): Promise<string> => ipcRenderer.invoke('update:download') as Promise<string>,
+  installUpdate: (): Promise<unknown> => ipcRenderer.invoke('update:install'),
 }
 
 // ── init ──────────────────────────────────────────────────────────────────
@@ -476,7 +472,6 @@ function doCheck(): void {
       return
     }
     updateState = 'available'
-    updateResult = r
     ui.updateBtn!.textContent = '下载更新'
     ui.updateBtn!.disabled = false
     setUpdateText(`发现新版本 v${r.latest}（当前 v${r.current}）`)
@@ -484,16 +479,14 @@ function doCheck(): void {
 }
 
 function doDownload(): void {
-  if (updateResult === null || updateResult.assetUrl === null) { setUpdateText('没有找到安装包下载地址。'); return }
   updateState = 'downloading'
   ui.updateBtn!.textContent = '下载中…'
   ui.updateBtn!.disabled = true
-  void api.downloadUpdate(updateResult.assetUrl).then((p) => {
-    installerPath = p
+  void api.downloadUpdate().then(() => {
     updateState = 'ready'
     ui.updateBtn!.textContent = '立即安装'
     ui.updateBtn!.disabled = false
-    setUpdateText('下载完成，点击安装后将退出并启动安装程序。')
+    setUpdateText('下载完成，点击安装后自动退出并重启为新版本。')
   }).catch((e) => {
     updateState = 'error'
     ui.updateBtn!.textContent = '重试'
@@ -503,7 +496,6 @@ function doDownload(): void {
 }
 
 function doInstall(): void {
-  if (installerPath === null) return
-  void api.installUpdate(installerPath)
-  setUpdateText('正在启动安装程序…')
+  void api.installUpdate()
+  setUpdateText('正在安装并重启…')
 }

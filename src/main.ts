@@ -22,6 +22,7 @@ import {
 } from './dsh-paths.js'
 import { startUsageTracking, type UsageController } from './usage-main.js'
 import { registerSettingsIpc } from './settings-ipc.js'
+import { startAutoCheck } from './updater.js'
 
 const APP_ID = 'io.github.jin-wen-jie.deepseek-harness-desktop'
 const HARNESS_PROJECT_URL = 'https://github.com/deepseek-ai/deepseek-harness'
@@ -610,6 +611,9 @@ if (!gotLock) {
     })
     // The usage overlay in the harness GUI speaks over this IPC surface.
     registerSettingsIpc(usageController, () => mainWindow)
+    // Silently check for a newer release in the background (packaged only);
+    // downloads and installs on quit without any wizard.
+    startAutoCheck()
     buildMenu()
     if (SMOKE) void runSmoke()
     else void launch()

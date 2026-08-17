@@ -4,6 +4,12 @@ copyright: Copyright © 2026 Jin-wen-jie and contributors
 # The bundled dsh CLI runs with ELECTRON_RUN_AS_NODE, so plain files beat an asar archive.
 asar: false
 npmRebuild: false
+# electron-updater needs the GitHub feed: publish config generates
+# app-update.yml in the app and latest.yml/blockmap on the release.
+publish:
+  provider: github
+  owner: Jin-wen-jie
+  repo: DeepSeek-Harness-Desktop-App
 # GitHub is slow or unreachable in some regions; pull the Electron binary from the npmmirror CDN.
 electronDownload:
   mirror: https://npmmirror.com/mirrors/electron/
@@ -22,8 +28,10 @@ win:
     - nsis
     - zip
 nsis:
-  oneClick: false
-  allowToChangeInstallationDirectory: true
+  # oneClick is required for silent auto-updates: the updater installs on
+  # quit without any wizard. Installs to the per-user default directory.
+  oneClick: true
+  perMachine: false
   createDesktopShortcut: true
   createStartMenuShortcut: true
   shortcutName: DeepSeek Harness
@@ -39,4 +47,3 @@ mac:
   target:
     - dmg
     - zip
-publish: null
