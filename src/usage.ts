@@ -47,6 +47,8 @@ export type UsageBucket = 'messages' | 'sessions' | 'agentPrompts' | 'other'
 /** Time-range choices offered by the statistics page. */
 export type UsageRange = 7 | 30 | 'all'
 
+import type { TokenStats } from './token-usage.js'
+
 const emptyDay = (): DayUsage => ({
   requests: 0,
   messages: 0,
@@ -134,6 +136,16 @@ export interface DailyRow {
   day: DayUsage
 }
 
+/** One model's token share over a time range (for the donut chart). */
+export interface ModelUsage {
+  /** Model id (e.g. `deepseek-v4-flash`). */
+  model: string
+  /** Total tokens (input + output + cache) billed to this model. */
+  tokens: number
+  /** Share of the range's total tokens, 0..1. */
+  share: number
+}
+
 /** Aggregated view handed to the statistics page for one time range. */
 export interface UsageSnapshot {
   range: UsageRange
@@ -151,6 +163,8 @@ export interface UsageSnapshot {
   daysTotal: number
   /** First recorded date, or null when the store is empty. */
   firstDate: string | null
+  /** Per-model token totals over the range, largest first. */
+  models: ModelUsage[]
 }
 
 /**
@@ -158,8 +172,15 @@ export interface UsageSnapshot {
  * @param days - the full day map.
  * @param range - 7 / 30 / all.
  * @param now - the "current" instant (injectable for tests).
+ * @param modelDays - optional per-day, per-model accounting (supplied by
+ *   the session-log scan) used to compute the per-model donut.
  */
-export function buildSnapshot(days: Record<string, DayUsage>, range: UsageRange, now: Date = new Date()): UsageSnapshot {
+export function buildSnapshot(
+  days: Record<string, DayUsage>,
+  range: UsageRange,
+  now: Date = new Date(),
+  modelDays: Record<string, Record<string, TokenStats>> = {},
+): UsageSnapshot {
   const todayKey = dateKey(now)
   const rows: DailyRow[] = []
   if (range === 'all') {
@@ -196,6 +217,7 @@ export function buildSnapshot(days: Record<string, DayUsage>, range: UsageRange,
 
   const today = days[todayKey] ?? emptyDay()
   const keys = Object.keys(days)
+  const models = computeModelUsage(rows, modelDays, totals)
   return {
     range,
     rows,
@@ -205,23 +227,28 @@ export function buildSnapshot(days: Record<string, DayUsage>, range: UsageRange,
     today,
     daysTotal: keys.length,
     firstDate: keys.length > 0 ? keys.sort()[0] : null,
+    models,
   }
 }
 
-/**
- * Fold token accounting from a session-log scan into the day map, keeping
- * the HTTP-derived counters untouched.
- * @param days - the usage store's day map, mutated in place.
- * @param tokenDays - token totals keyed by local date.
- */
-export function mergeTokenUsage(days: Record<string, DayUsage>, tokenDays: Record<string, import('./token-usage.js').TokenDayUsage>): void {
-  for (const [key, tokens] of Object.entries(tokenDays)) {
-    const day = days[key] ?? (days[key] = emptyDay())
-    day.inputTokens += tokens.inputTokens
-    day.outputTokens += tokens.outputTokens
-    day.cacheReadTokens += tokens.cacheReadTokens
-    day.cacheWriteTokens += tokens.cacheWriteTokens
+/** Sum per-model token totals over the snapshot's rows and rank them. */
+export function computeModelUsage(
+  rows: DailyRow[],
+  modelDays: Record<string, Record<string, TokenStats>>,
+  totals: UsageTotals,
+): ModelUsage[] {
+  const agg: Record<string, number> = {}
+  for (const { date } of rows) {
+    const byModel = modelDays[date]
+    if (byModel === undefined) continue
+    for (const [model, stats] of Object.entries(byModel)) {
+      agg[model] = (agg[model] ?? 0) + stats.inputTokens + stats.outputTokens + stats.cacheReadTokens + stats.cacheWriteTokens
+    }
   }
+  const totalTokens = totals.inputTokens + totals.outputTokens + totals.cacheReadTokens + totals.cacheWriteTokens
+  return Object.entries(agg)
+    .map(([model, tokens]) => ({ model, tokens, share: totalTokens > 0 ? tokens / totalTokens : 0 }))
+    .sort((a, b) => b.tokens - a.tokens)
 }
 
 /** Human label for a row date relative to today. */

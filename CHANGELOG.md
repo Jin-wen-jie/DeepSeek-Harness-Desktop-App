@@ -2,6 +2,20 @@
 
 All notable changes to this project are documented in this file. The format follows [Keep a Changelog](https://keepachangelog.com/en/1.1.0/) and the project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [0.5.0] - 2026-08-17
+
+### Added
+
+- **Full-screen usage overlay** (click the bottom-left 使用统计 pill): the panel now fills the window with a wider layout
+- **Bar chart hover details**: moving the cursor over a day's bar shows that day's date, total tokens, input / cache read–write / output, and message count
+- **Per-model donut**: the ring is split by model (from the session logs' per-message model attribution) with a legend listing every model's name and percentage; hovering a sector shows the model's exact usage and share
+- A 使用模型 summary card counts the distinct models used in the selected range
+- Token/year model accounting now derives from per-file log aggregates (rebuilt in memory each scan), so a re-read session log replaces its contribution instead of double counting across incremental scans
+
+### Changed
+
+- The separate “Token 用量” composition donut was replaced by the per-model breakdown the stats page needs
+
 ## [0.4.0] - 2026-08-17
 
 ### Added

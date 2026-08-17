@@ -1,19 +1,20 @@
 /**
- * Preload for the harness GUI window: injects the app's own usage overlay
- * at the bottom-left, anchored to the harness's settings trigger.
+ * Preload for the harness GUI window: injects the app's own usage overlay,
+ * anchored to the harness's bottom-left settings trigger.
  *
- * The overlay is a floating "使用统计" pill docked just above the GUI's own
- * bottom-left 设置 button (the anchor is located from the real DOM and
- * repositioned while the SPA settles; a fixed fallback keeps it usable when
- * the layout differs). Clicking it opens a dark panel with a per-day token
- * bar chart, an input/output/cache donut, range switching, and the in-app
- * update check.
+ * A floating "使用统计" pill is docked just above the GUI's own 设置 button
+ * (locating the anchor in the live DOM and repositioning while the SPA
+ * settles; a fixed fallback keeps it usable). Clicking it opens a FULL-SCREEN
+ * overlay panel with:
+ *   - a per-day token bar chart whose bars show that day's full usage on hover,
+ *   - a per-model donut whose sectors show each model's usage share on hover,
+ *   - range switching (最近7天/最近30天/全部) and the in-app update check.
  *
- * This is a sandboxed preload: it has no Node access beyond Electron's
- * ipcRenderer, and it manipulates the page DOM from its isolated world (DOM
- * is shared, JS globals are not). All styling goes through CSSOM and SVG
- * presentation attributes so the harness page's Content Security Policy can
- * never block the overlay.
+ * This is a sandboxed preload: no Node access beyond Electron's ipcRenderer,
+ * and the page DOM is manipulated from its isolated world (DOM is shared, JS
+ * globals are not). Styling goes through CSSOM and SVG presentation
+ * attributes so the harness page's Content Security Policy can never block
+ * the overlay.
  * @module gui-usage-preload
  */
 
@@ -64,8 +65,8 @@ const COLORS = {
   bg: '#0d1117', panel: '#161b22', panel2: '#1c2128', border: '#21262d',
   text: '#e6edf3', muted: '#8b949e', faint: '#6e7681',
   accent: '#4da6ff', green: '#3fb950', red: '#f85149',
-  input: '#4da6ff', cacheRead: '#3fb950', cacheWrite: '#6e7681', output: '#f0883e',
 }
+const MODEL_COLORS = ['#4da6ff', '#f0883e', '#3fb950', '#a371f7', '#e3b341', '#39c5cf', '#f778ba', '#7d8590']
 
 // ── state ─────────────────────────────────────────────────────────────────
 let range = '7'
@@ -73,15 +74,47 @@ let updateState = 'idle'
 let updateResult: { latest: string | null; assetUrl: string | null; assetName: string | null } | null = null
 let installerPath: string | null = null
 let snapshot: Record<string, unknown> | null = null
+let panelOpen = false
 
-// entry + panel elements
 let entry: HTMLButtonElement | null = null
 let panel: HTMLDivElement | null = null
-let bodyBackdrop: HTMLDivElement | null = null
-let panelTransformed = false // whether the panel is laid out
+let tooltip: HTMLDivElement | null = null
+
+/** Wire nodes that render() mutates — created once in buildPanel. */
+const ui = {
+  seg: [] as HTMLButtonElement[],
+  barWrap: null as HTMLDivElement | null,
+  donutWrap: null as HTMLDivElement | null,
+  chipTotal: null as HTMLDivElement | null,
+  chipInput: null as HTMLDivElement | null,
+  chipOutput: null as HTMLDivElement | null,
+  chipActive: null as HTMLDivElement | null,
+  chipModels: null as HTMLDivElement | null,
+  updateText: null as HTMLDivElement | null,
+  updateBtn: null as HTMLButtonElement | null,
+  dataPath: null as HTMLElement | null,
+}
 
 const fmt = (n: number): string => Number(n).toLocaleString('zh-CN')
 const compact = new Intl.NumberFormat('zh-CN', { notation: 'compact', maximumFractionDigits: 1 })
+
+/** Narrow IPC surface used by the overlay. */
+interface UpdateCheckResult {
+  status: string
+  current: string
+  latest: string | null
+  hasUpdate: boolean
+  error?: string
+  assetUrl: string | null
+  assetName: string | null
+}
+const api = {
+  meta: (): Promise<{ filePath?: string } | null> => ipcRenderer.invoke('usage:meta') as Promise<{ filePath?: string } | null>,
+  openDataDir: (): Promise<unknown> => ipcRenderer.invoke('usage:open-data-dir'),
+  checkUpdate: (): Promise<UpdateCheckResult> => ipcRenderer.invoke('update:check') as Promise<UpdateCheckResult>,
+  downloadUpdate: (url: string): Promise<string> => ipcRenderer.invoke('update:download', url) as Promise<string>,
+  installUpdate: (path: string): Promise<unknown> => ipcRenderer.invoke('update:install', path),
+}
 
 // ── init ──────────────────────────────────────────────────────────────────
 function init(): void {
@@ -93,7 +126,11 @@ function init(): void {
   buildPanel(root)
   positionEntry()
   repositionLoop(root)
-  bindUpdates()
+  ipcRenderer.on('usage:updated', () => { if (panelOpen) loadSnapshot() })
+  ipcRenderer.on('update:progress', (_event: unknown, fraction: number) => {
+    if (updateState === 'downloading') ui.updateBtn!.textContent = `下载中 ${Math.round(fraction * 100)}%`
+    else if (updateState === 'available') ui.updateBtn!.textContent = '下载中…'
+  })
 }
 
 /** Build the floating pill docked above the harness's own 设置 button. */
@@ -101,34 +138,29 @@ function buildEntry(root: HTMLElement): void {
   entry = document.createElement('button')
   entry.textContent = '📊 使用统计'
   entry.style.cssText = [
-    'position:fixed', 'z-index:1',
-    'display:flex', 'align-items:center', 'gap:6px',
-    'padding:7px 12px', 'border-radius:999px',
-    'background:#161b22', 'border:1px solid #30363d',
+    'position:fixed', 'z-index:1', 'display:flex', 'align-items:center', 'gap:6px',
+    'padding:7px 12px', 'border-radius:999px', 'background:#161b22', 'border:1px solid #30363d',
     'color:#e6edf3', 'font:12.5px system-ui,"Segoe UI","Microsoft YaHei",sans-serif',
     'cursor:pointer', 'box-shadow:0 4px 14px rgba(0,0,0,.35)',
   ].join(';')
-  entry.addEventListener('mouseenter', () => { entry!.style.borderColor = COLORS.accent })
-  entry.addEventListener('mouseleave', () => { entry!.style.borderColor = '#30363d' })
   entry.addEventListener('click', togglePanel)
   root.appendChild(entry)
 }
 
 /**
- * Locate the harness's bottom-left 设置 trigger from the live DOM. We look
- * for the bottom-most compact element whose accessible name mentions 设置.
+ * Locate the harness's bottom-left 设置 trigger from the live DOM: the
+ * bottom-most compact element whose accessible name mentions 设置.
  */
 function settingsAnchor(): { top: number; left: number } | null {
-  let best: { top: number; left: number; tag: string } | null = null
+  let best: { top: number; left: number } | null = null
   const all = document.querySelectorAll('button, a, [role="button"], [aria-label], [title], [class]')
   for (let i = 0; i < all.length; i++) {
     const node = all[i] as HTMLElement
-    if (node instanceof HTMLElement === false) continue
     const rect = node.getBoundingClientRect()
     if (rect.width < 8 || rect.height < 8 || rect.bottom > window.innerHeight - 4) continue
     const label = String(node.getAttribute('aria-label') ?? '') + String(node.getAttribute('title') ?? '') + String(node.textContent ?? '').trim()
     if (!label.includes('设置')) continue
-    if (best === null || rect.bottom > best.top) best = { top: rect.bottom, left: rect.left, tag: label.slice(0, 12) }
+    if (best === null || rect.bottom > best.top) best = { top: rect.bottom, left: rect.left }
   }
   return best
 }
@@ -158,48 +190,17 @@ function repositionLoop(root: HTMLElement): void {
   window.addEventListener('resize', positionEntry)
 }
 
-function bindUpdates(): void {
-  ipcRenderer.on('usage:updated', () => { loadSnapshot() })
-  ipcRenderer.on('update:progress', (_event: unknown, fraction: number) => {
-    if (updateState === 'downloading') setUpdateText(`下载中 ${Math.round(fraction * 100)}%`)
-    else if (updateState === 'available') setUpdateText('正在下载…')
-  })
-}
-
-// ── panel ─────────────────────────────────────────────────────────────────
-/** Wire nodes that render() mutates — created once in buildPanel. */
-let ui = {
-  seg: [] as HTMLButtonElement[],
-  rangeHint: null as HTMLDivElement | null,
-  barTitle: null as HTMLDivElement | null,
-  barWrap: null as HTMLDivElement | null,
-  donutWrap: null as HTMLDivElement | null,
-  chipTotal: null as HTMLDivElement | null,
-  chipInput: null as HTMLDivElement | null,
-  chipOutput: null as HTMLDivElement | null,
-  chipActive: null as HTMLDivElement | null,
-  updateText: null as HTMLDivElement | null,
-  updateBtn: null as HTMLButtonElement | null,
-  dataPath: null as HTMLElement | null,
-}
-
+// ── panel (full screen) ───────────────────────────────────────────────────
 function buildPanel(root: HTMLElement): void {
-  bodyBackdrop = div({
-    position: 'fixed', inset: '0', background: 'rgba(1,4,9,.55)', display: 'none', zIndex: '0',
-  })
-  bodyBackdrop.addEventListener('click', hidePanel)
-  root.appendChild(bodyBackdrop)
-
   panel = div({
-    position: 'fixed', top: '50%', left: '50%', transform: 'translate(-50%,-50%)',
-    width: '720px', maxWidth: '92vw', maxHeight: '82vh', overflow: 'auto',
-    background: COLORS.bg, border: `1px solid ${COLORS.border}`, borderRadius: '12px',
-    boxShadow: '0 18px 50px rgba(0,0,0,.5)', color: COLORS.text, display: 'none',
+    position: 'fixed', inset: '0', width: '100%', height: '100%', display: 'none',
+    background: COLORS.bg, color: COLORS.text, overflow: 'auto', zIndex: '0',
     font: '13px/1.5 system-ui,"Segoe UI","Microsoft YaHei",sans-serif',
-    padding: '18px 20px 16px', zIndex: '1',
+    padding: '20px 26px 36px',
   })
-  const head = div({ display: 'flex', alignItems: 'center', gap: '14px', marginBottom: '14px' })
-  const title = div({ fontSize: '17px', fontWeight: '650' }, ['📊 使用统计'])
+
+  const head = div({ display: 'flex', alignItems: 'center', gap: '16px', position: 'sticky', top: '0', background: COLORS.bg, padding: '4px 0 12px', zIndex: '1' })
+  const title = div({ fontSize: '20px', fontWeight: '650', letterSpacing: '.2px' }, ['📊 使用统计'])
   const seg = div({ display: 'flex', gap: '2px', background: COLORS.panel2, borderRadius: '8px', padding: '3px' })
   for (const [value, label] of [['7', '最近7天'], ['30', '最近30天'], ['all', '全部']] as const) {
     const b = document.createElement('button')
@@ -213,84 +214,100 @@ function buildPanel(root: HTMLElement): void {
     seg.appendChild(b)
     ui.seg.push(b)
   }
-  const close = button('✕', { border: '0', background: 'transparent', color: '#8b949e', fontSize: '15px', cursor: 'pointer', marginLeft: 'auto' }, hidePanel)
-  head.append(title, seg, close)
+  ui.updateText = div({ fontSize: '12px', color: COLORS.muted })
+  ui.updateBtn = button('检查更新', { border: '1px solid #30363d', background: '#1c2128', color: '#e6edf3', fontSize: '12.5px', padding: '5px 14px', borderRadius: '7px', cursor: 'pointer' }, onUpdateClick)
+  const close = button('✕', { border: '0', background: 'transparent', color: '#8b949e', fontSize: '16px', cursor: 'pointer', marginLeft: '4px' }, hidePanel)
+  head.append(title, seg, ui.updateText, ui.updateBtn, close)
   panel.appendChild(head)
 
+  // stat chips
+  const chips = div({ display: 'grid', gridTemplateColumns: 'repeat(5,1fr)', gap: '12px', marginTop: '4px' })
+  ui.chipTotal = chip('🧾 Token 用量', chips)
+  ui.chipInput = chip('📥 输入 Tokens', chips)
+  ui.chipOutput = chip('📤 输出 Tokens', chips)
+  ui.chipActive = chip('🔥 活跃天数', chips)
+  ui.chipModels = chip('🤖 使用模型', chips)
+  panel.appendChild(chips)
+
   // charts row
-  const charts = div({ display: 'grid', gridTemplateColumns: '1fr 300px', gap: '16px' })
-  const barBlock = div({ background: COLORS.panel, border: `1px solid ${COLORS.border}`, borderRadius: '10px', padding: '12px 14px' })
-  ui.barTitle = div({ fontSize: '12.5px', color: COLORS.muted, marginBottom: '10px' })
+  const charts = div({ display: 'grid', gridTemplateColumns: '1fr 360px', gap: '16px', marginTop: '14px' })
+  const barBlock = div({ background: COLORS.panel, border: `1px solid ${COLORS.border}`, borderRadius: '12px', padding: '14px 16px' })
   ui.barWrap = div({})
-  barBlock.append(ui.barTitle, ui.barWrap)
-  const donutBlock = div({ background: COLORS.panel, border: `1px solid ${COLORS.border}`, borderRadius: '10px', padding: '12px 14px', textAlign: 'center' })
-  const donutTitle = div({ fontSize: '12.5px', color: COLORS.muted, marginBottom: '6px' }, ['用量构成'])
+  barBlock.append(div({ fontSize: '13px', color: COLORS.muted, marginBottom: '10px' }, ['每日 Token 趋势 · 鼠标悬停查看当天明细']), ui.barWrap)
+  const donutBlock = div({ background: COLORS.panel, border: `1px solid ${COLORS.border}`, borderRadius: '12px', padding: '14px 16px' })
   ui.donutWrap = div({})
-  donutBlock.append(donutTitle, ui.donutWrap)
+  donutBlock.append(div({ fontSize: '13px', color: COLORS.muted, marginBottom: '8px' }, ['模型用量占比 · 鼠标悬停查看']), ui.donutWrap)
   charts.append(barBlock, donutBlock)
   panel.appendChild(charts)
 
-  // stat chips
-  const chips = div({ display: 'grid', gridTemplateColumns: 'repeat(4,1fr)', gap: '10px', marginTop: '14px' })
-  ui.chipTotal = chip('🧾 Token 用量', '', chips)
-  ui.chipInput = chip('📥 输入 Tokens', '', chips)
-  ui.chipOutput = chip('📤 输出 Tokens', '', chips)
-  ui.chipActive = chip('🔥 活跃天数', '', chips)
-  panel.appendChild(chips)
-
-  // update row
-  const up = div({ display: 'flex', alignItems: 'center', gap: '10px', marginTop: '14px' })
-  ui.updateText = div({ fontSize: '12px', color: COLORS.muted })
-  ui.updateBtn = button('检查更新', { border: '1px solid #30363d', background: '#1c2128', color: '#e6edf3', fontSize: '12.5px', padding: '5px 14px', borderRadius: '7px', cursor: 'pointer', marginLeft: 'auto' }, onUpdateClick)
-  up.append(ui.updateText, ui.updateBtn)
-  panel.appendChild(up)
-
   // footer
   const foot = div({
-    display: 'flex', alignItems: 'center', gap: '10px', marginTop: '12px',
-    paddingTop: '10px', borderTop: '1px solid ' + COLORS.border, fontSize: '11px', color: COLORS.faint,
+    display: 'flex', alignItems: 'center', gap: '12px', flexWrap: 'wrap', marginTop: '18px',
+    paddingTop: '12px', borderTop: `1px solid ${COLORS.border}`, fontSize: '11.5px', color: COLORS.faint,
   })
-  const note = div({}, ['Token 来自本地会话日志，每 20 秒自动刷新 · 永久保留。'])
+  const note = div({}, ['Token 数据来自本地会话日志，每 20 秒自动刷新 · 永久保留。'])
   const openDir = button('打开数据目录', { border: '1px solid #21262d', background: '#1c2128', color: '#8b949e', fontSize: '11px', padding: '4px 10px', borderRadius: '6px', cursor: 'pointer', marginLeft: 'auto' }, () => { void api.openDataDir() })
-  ui.dataPath = div({ fontFamily: 'monospace', color: COLORS.muted, maxWidth: '260px', overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' })
+  ui.dataPath = div({ fontFamily: 'monospace', color: COLORS.muted, maxWidth: '300px', overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' })
   foot.append(note, ui.dataPath, openDir)
   panel.appendChild(foot)
 
+  // shared hover tooltip
+  tooltip = div({
+    position: 'fixed', zIndex: '2', display: 'none', pointerEvents: 'none',
+    background: '#242a33', border: '1px solid #3d454f', color: COLORS.text,
+    fontSize: '11.5px', lineHeight: '1.55', padding: '7px 10px', borderRadius: '8px',
+    boxShadow: '0 6px 18px rgba(0,0,0,.4)', whiteSpace: 'pre', maxWidth: '300px',
+  })
+  root.appendChild(tooltip)
+
   root.appendChild(panel)
-  root.appendChild(bodyBackdrop)
   void api.meta().then((m) => { if (m !== null && m.filePath !== undefined) ui.dataPath!.textContent = String(m.filePath) })
   loadSnapshot()
 }
 
-function chip(title: string, sub: string, parent: HTMLElement): HTMLDivElement {
+function chip(title: string, parent: HTMLElement): HTMLDivElement {
   const c = div({ background: COLORS.panel, border: `1px solid ${COLORS.border}`, borderRadius: '10px', padding: '10px 12px' })
   const t = div({ fontSize: '11.5px', color: COLORS.muted }, [title])
-  const v = div({ fontSize: '16px', fontWeight: '650', marginTop: '4px', letterSpacing: '.2px' })
+  const v = div({ fontSize: '17px', fontWeight: '650', marginTop: '4px', letterSpacing: '.2px' })
   c.append(t, v)
   parent.appendChild(c)
   return v
 }
 
 function togglePanel(): void {
-  panelTransformed = !panelTransformed
-  if (panel === null || bodyBackdrop === null) return
-  panel.style.display = panelTransformed ? 'block' : 'none'
-  bodyBackdrop.style.display = panelTransformed ? 'block' : 'none'
+  if (panel === null) return
+  panelOpen = !panelOpen
+  panel.style.display = panelOpen ? 'block' : 'none'
+  if (panelOpen) loadSnapshot()
 }
 
 function hidePanel(): void {
-  panelTransformed = false
-  if (panel !== null && bodyBackdrop !== null) {
-    panel.style.display = 'none'
-    bodyBackdrop.style.display = 'none'
-  }
+  if (panel === null) return
+  panelOpen = false
+  panel.style.display = 'none'
+  hideTooltip()
+}
+
+/** Show a hover tooltip near an element's position. */
+function showTooltip(x: number, y: number, lines: string[]): void {
+  if (tooltip === null) return
+  tooltip.textContent = lines.join('\n')
+  tooltip.style.display = 'block'
+  const w = tooltip.offsetWidth
+  tooltip.style.left = Math.max(8, Math.min(x + 14, window.innerWidth - w - 10)) + 'px'
+  tooltip.style.top = Math.max(8, y + 14) + 'px'
+}
+
+function hideTooltip(): void {
+  if (tooltip !== null) tooltip.style.display = 'none'
 }
 
 // ── data & render ─────────────────────────────────────────────────────────
 function reload(): void {
   for (const b of ui.seg) {
-    b.style.background = b.textContent === (range === '7' ? '最近7天' : range === '30' ? '最近30天' : '全部') ? 'rgba(77,166,255,.18)' : 'transparent'
-    b.style.color = b.textContent === (range === '7' ? '最近7天' : range === '30' ? '最近30天' : '全部') ? '#fff' : '#8b949e'
+    const target = range === '7' ? '最近7天' : range === '30' ? '最近30天' : '全部'
+    b.style.background = b.textContent === target ? 'rgba(77,166,255,.18)' : 'transparent'
+    b.style.color = b.textContent === target ? '#fff' : '#8b949e'
   }
   loadSnapshot()
 }
@@ -306,38 +323,32 @@ function render(): void {
   if (snapshot === null || panel === null) return
   const rows = snapshot['rows'] as Array<{ date: string; label: string; day: Record<string, number> }>
   const totals = snapshot['totals'] as Record<string, number>
+  const models = snapshot['models'] as Array<{ model: string; tokens: number; share: number }>
   const activeDays = Number(snapshot['activeDays'])
   const totalTokens = totals['inputTokens'] + totals['outputTokens'] + totals['cacheReadTokens'] + totals['cacheWriteTokens']
   const inputBilled = totals['inputTokens'] + totals['cacheReadTokens'] + totals['cacheWriteTokens']
 
-  ui.barTitle!.textContent = `每日 Token 趋势 · ${range === 'all' ? '全部' : '最近' + range + '天'}`
-  ui.barWrap!.replaceChildren(barChart(rows))
-  // Mutually exclusive donut segments: uncached input, cache reads, cache
-  // writes, output — their sum equals the total shown in the center.
-  ui.donutWrap!.replaceChildren(donutChart(
-    totals['inputTokens'] ?? 0,
-    totals['outputTokens'] ?? 0,
-    totals['cacheReadTokens'] ?? 0,
-    totals['cacheWriteTokens'] ?? 0,
-    totalTokens,
-  ))
-
   ui.chipTotal!.textContent = compact.format(totalTokens)
-  ui.chipTotal!.title = fmt(totalTokens) + ' = 输入 + 输出 + 缓存'
+  ui.chipTotal!.title = `${fmt(totalTokens)} = 输入 + 输出 + 缓存`
   ui.chipInput!.textContent = compact.format(inputBilled)
-  ui.chipInput!.title = '计费输入（含缓存）' + fmt(inputBilled)
+  ui.chipInput!.title = `计费输入（含缓存） ${fmt(inputBilled)}`
   ui.chipOutput!.textContent = compact.format(totals['outputTokens'] ?? 0)
   ui.chipActive!.textContent = String(activeDays)
+  ui.chipModels!.textContent = String(models.length)
+
+  ui.barWrap!.replaceChildren(barChart(rows))
+  ui.donutWrap!.replaceChildren(donutChart(models, totalTokens))
 }
 
-// ── charts (pure SVG, CSP-safe presentation attributes) ───────────────────
+/** Per-day token bar chart; hovering a bar shows that day's full usage. */
 function barChart(rows: Array<{ date: string; label: string; day: Record<string, number> }>): SVGElement {
-  const W = 640, H = 190, PLOT_H = 130, BASELINE = 160
+  const W = 680, H = 200, PLOT_H = 138, BASELINE = 168
   const svg = svgEl('svg', { width: '100%', viewBox: `0 0 ${W} ${H}` } as Record<string, string>)
   const data = rows.map((r) => ({
     label: r.label,
-    value: (r.day['inputTokens'] ?? 0) + (r.day['outputTokens'] ?? 0) + (r.day['cacheReadTokens'] ?? 0) + (r.day['cacheWriteTokens'] ?? 0),
     date: r.date,
+    day: r.day,
+    value: (r.day['inputTokens'] ?? 0) + (r.day['outputTokens'] ?? 0) + (r.day['cacheReadTokens'] ?? 0) + (r.day['cacheWriteTokens'] ?? 0),
   }))
   const max = Math.max(1, ...data.map((d) => d.value))
   const n = data.length
@@ -350,14 +361,21 @@ function barChart(rows: Array<{ date: string; label: string; day: Record<string,
     const w = Math.max(2, slot * 0.68)
     const y = BASELINE - bh
     const bar = svgEl('rect', { x, y, width: w, height: bh, rx: 3, fill: d.value > 0 ? (i === 0 ? '#4da6ff' : '#2f81f7') : '#21262d' })
-    const title = svgEl('title', {})
-    title.textContent = `${d.date} · ${compact.format(d.value)} tokens`
-    bar.appendChild(title)
+    bar.addEventListener('mousemove', (ev: MouseEvent) => {
+      showTooltip(ev.clientX, ev.clientY, [
+        `${d.label} · ${d.date}`,
+        `总 Tokens：${fmt(d.value)}`,
+        `输入：${fmt(d.day['inputTokens'] ?? 0)}`,
+        `缓存读取：${fmt(d.day['cacheReadTokens'] ?? 0)} · 写入：${fmt(d.day['cacheWriteTokens'] ?? 0)}`,
+        `输出：${fmt(d.day['outputTokens'] ?? 0)}`,
+        `消息：${fmt(d.day['messages'] ?? 0)} 条`,
+      ])
+    })
+    bar.addEventListener('mouseleave', hideTooltip)
     svg.append(bar)
-    // sparse x labels
-    const step = Math.max(1, Math.ceil(n / 8))
+    const step = Math.max(1, Math.ceil(n / 9))
     if (i % step === 0) {
-      const text = svgEl('text', { x: x + w / 2, y: H - 2, 'font-size': 10, fill: '#6e7681', 'text-anchor': 'middle' })
+      const text = svgEl('text', { x: x + w / 2, y: H - 4, 'font-size': 10, fill: '#6e7681', 'text-anchor': 'middle' })
       text.textContent = d.label
       svg.append(text)
     }
@@ -365,55 +383,67 @@ function barChart(rows: Array<{ date: string; label: string; day: Record<string,
   return svg
 }
 
-function donutChart(input: number, output: number, cacheRead: number, cacheWrite: number, total: number): SVGElement {
-  const SIZE = 150, R = 54, CX = SIZE / 2, CY = SIZE / 2
-  const svg = svgEl('svg', { width: '100%', viewBox: `0 0 ${SIZE} ${SIZE + 30}` } as Record<string, string>)
-  const raw: Array<[number, string, string]> = [
-    [input, COLORS.input, '输入'],
-    [output, COLORS.output, '输出'],
-    [cacheRead, COLORS.cacheRead, '缓存读取'],
-    [cacheWrite, COLORS.cacheWrite, '缓存写入'],
-  ]
-  const segments = raw.filter(([value]) => value > 0)
+/** Per-model donut; hovering a sector shows that model's usage share. */
+function donutChart(models: Array<{ model: string; tokens: number; share: number }>, total: number): HTMLDivElement {
+  const wrap = div({ display: 'flex', flexDirection: 'column', alignItems: 'center', gap: '10px' })
+  if (models.length === 0) {
+    wrap.append(div({ color: COLORS.faint, fontSize: '12px', padding: '30px 0' }, ['暂无模型用量数据']))
+    return wrap
+  }
+  const SIZE = 170, R = 62, CX = SIZE / 2, CY = SIZE / 2
+  const svg = svgEl('svg', { width: '100%', viewBox: `0 0 ${SIZE} ${SIZE}` } as Record<string, string>)
   const circumference = 2 * Math.PI * R
   let offset = 0
-  if (segments.length > 0) {
-    for (const [value, color] of segments) {
-      const dash = Math.max(0, (value / total) * circumference)
-      svg.append(svgEl('circle', {
-        cx: CX, cy: CY, r: R, fill: 'none', stroke: color, 'stroke-width': 22,
-        'stroke-dasharray': `${dash} ${circumference - dash}`,
-        'stroke-dashoffset': -offset, transform: `rotate(-90 ${CX} ${CY})`,
-      }))
-      offset += dash
+  models.forEach((entry, i) => {
+    const color = MODEL_COLORS[i % MODEL_COLORS.length]
+    const dash = Math.max(0, entry.share * circumference)
+    const sector = svgEl('circle', {
+      cx: CX, cy: CY, r: R, fill: 'none', stroke: color, 'stroke-width': 24,
+      'stroke-dasharray': `${dash} ${circumference - dash}`,
+      'stroke-dashoffset': -offset, transform: `rotate(-90 ${CX} ${CY})`,
+      'stroke-linecap': 'butt',
+    })
+    if (entry.share > 0) {
+      sector.addEventListener('mousemove', (ev: MouseEvent) => {
+        showTooltip(ev.clientX, ev.clientY, [
+          `模型：${entry.model}`,
+          `用量：${fmt(entry.tokens)} tokens`,
+          `占比：${Math.round(entry.share * 100)}%`,
+        ])
+      })
+      sector.addEventListener('mouseleave', hideTooltip)
+      sector.style.cursor = 'pointer'
     }
-  } else {
-    svg.append(svgEl('circle', { cx: CX, cy: CY, r: R, fill: 'none', stroke: '#21262d', 'stroke-width': 22 }))
-  }
-  const totalText = svgEl('text', { x: CX, y: CY - 2, 'text-anchor': 'middle', 'font-size': 15, fill: '#e6edf3', 'font-weight': '650' })
+    svg.append(sector)
+    offset += dash
+  })
+  const totalText = svgEl('text', { x: CX, y: CY - 2, 'text-anchor': 'middle', 'font-size': 16, fill: '#e6edf3', 'font-weight': '650' })
   totalText.textContent = compact.format(total)
   svg.append(totalText)
   const totalLabel = svgEl('text', { x: CX, y: CY + 14, 'text-anchor': 'middle', 'font-size': 9, fill: '#6e7681' })
   totalLabel.textContent = '总 Tokens'
   svg.append(totalLabel)
-  let legendX = 4
-  for (const [value, color, name] of segments) {
-    const text = svgEl('text', { x: legendX, y: SIZE + 12, 'font-size': 9.5, fill: '#8b949e' })
-    const dot = svgEl('tspan', { fill: color, 'font-weight': '700' })
-    dot.textContent = '● '
-    text.appendChild(dot)
-    text.appendChild(document.createTextNode(`${name} ${Math.round((value / total) * 100)}%`))
-    svg.append(text)
-    legendX += (name.length + 6) * 9.5
-  }
-  return svg
+  wrap.append(svg)
+
+  // legend: every model with its share.
+  const legend = div({ width: '100%', display: 'grid', gridTemplateColumns: '1fr 1fr', gap: '3px 14px', fontSize: '11px' })
+  models.forEach((entry, i) => {
+    const row = div({ display: 'flex', alignItems: 'center', gap: '6px', color: COLORS.muted })
+    const dot = div({ width: '9px', height: '9px', borderRadius: '3px', background: MODEL_COLORS[i % MODEL_COLORS.length], flex: 'none' })
+    const name = div({ overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap', maxWidth: '130px' }, [entry.model])
+    const pct = div({ marginLeft: 'auto', color: COLORS.text }, [`${Math.round(entry.share * 100)}%`])
+    row.append(dot, name, pct)
+    legend.append(row)
+  })
+  wrap.append(legend)
+  return wrap
 }
 
 // ── update flow ────────────────────────────────────────────────────────────
 function setUpdateText(text: string): void {
   if (ui.updateText !== null) {
     ui.updateText.textContent = text
-    ui.updateText.style.color = updateState === 'latest' ? COLORS.green : updateState === 'error' ? '#f85149' : COLORS.muted
+    ui.updateText.style.color = updateState === 'latest' ? COLORS.green : updateState === 'error' ? COLORS.red : COLORS.muted
   }
 }
 
@@ -431,25 +461,25 @@ function doCheck(): void {
   ui.updateBtn!.disabled = true
   setUpdateText('正在检查最新版本…')
   void api.checkUpdate().then((r) => {
-    if (r === null || r.status === 'error') {
+    if (r.status === 'error') {
       updateState = 'error'
       ui.updateBtn!.textContent = '重试'
       ui.updateBtn!.disabled = false
-      setUpdateText(r !== null && r.error ? r.error : '检查更新失败。')
+      setUpdateText(r.error ?? '检查更新失败。')
       return
     }
     if (!r.hasUpdate) {
       updateState = 'latest'
       ui.updateBtn!.textContent = '检查更新'
       ui.updateBtn!.disabled = false
-      setUpdateText('已是最新版本 v' + r.current)
+      setUpdateText(`已是最新版本 v${r.current}`)
       return
     }
     updateState = 'available'
     updateResult = r
     ui.updateBtn!.textContent = '下载更新'
     ui.updateBtn!.disabled = false
-    setUpdateText('发现新版本 v' + r.latest + '（当前 v' + r.current + '）')
+    setUpdateText(`发现新版本 v${r.latest}（当前 v${r.current}）`)
   })
 }
 
@@ -476,24 +506,4 @@ function doInstall(): void {
   if (installerPath === null) return
   void api.installUpdate(installerPath)
   setUpdateText('正在启动安装程序…')
-}
-
-/** Shape of the `update:check` response (mirrors updater.UpdateCheckResult). */
-interface UpdateCheckResult {
-  status: string
-  current: string
-  latest: string | null
-  hasUpdate: boolean
-  error?: string
-  assetUrl: string | null
-  assetName: string | null
-}
-
-/** Narrow IPC surface used by the overlay. */
-const api = {
-  meta: (): Promise<{ filePath?: string } | null> => ipcRenderer.invoke('usage:meta') as Promise<{ filePath?: string } | null>,
-  openDataDir: (): Promise<unknown> => ipcRenderer.invoke('usage:open-data-dir'),
-  checkUpdate: (): Promise<UpdateCheckResult> => ipcRenderer.invoke('update:check') as Promise<UpdateCheckResult>,
-  downloadUpdate: (url: string): Promise<string> => ipcRenderer.invoke('update:download', url) as Promise<string>,
-  installUpdate: (path: string): Promise<{ ok: boolean }> => ipcRenderer.invoke('update:install', path) as Promise<{ ok: boolean }>,
 }

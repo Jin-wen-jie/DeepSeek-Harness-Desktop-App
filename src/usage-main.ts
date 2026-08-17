@@ -1,13 +1,21 @@
 /**
  * Main-process wiring for usage statistics: observes the harness's `/api/*`
- * traffic, folds it into per-day counters, persists them forever, and serves
- * snapshots to the statistics window.
+ * traffic, folds it into per-day HTTP counters (persisted forever), and
+ * derives exact token + per-model accounting from the harness session logs
+ * (exact numbers that only the logs carry; kept in memory and refreshed
+ * every few seconds).
  *
  * The observation point is Electron's `webRequest` on the default session:
  * every `POST /api/<method>` the web GUI (or the shell itself) sends to the
- * local dsh server passes through it. Counting is real-time and needs no
- * cooperation from the harness, which is what keeps it robust across dsh
- * releases.
+ * local dsh server passes through it. Token accounting is scanned from the
+ * durable session logs — webRequest cannot see provider token usage.
+ *
+ * Token totals are derived purely from the logs to stay exact across
+ * restarts and appends: the scanner reports per-file aggregates for changed
+ * files only, `fileAccounting` maps each log path to its last aggregate, and
+ * every snapshot rebuilds the derived day totals and per-model figures from
+ * those aggregates, so a re-read file replaces its contribution instead of
+ * double-counting it.
  * @module usage-main
  */
 
@@ -18,14 +26,13 @@ import {
   buildSnapshot,
   dateKey,
   isUserActivity,
-  mergeTokenUsage,
   recordApiCall,
   type DayUsage,
   type UsageFile,
   type UsageRange,
   type UsageSnapshot,
 } from './usage.js'
-import { scanTokenLogs } from './token-usage.js'
+import { scanTokenLogs, type TokenDays, type TokenStats } from './token-usage.js'
 
 /** Filename of the durable per-day store. */
 const STORE_FILENAME = 'usage.json'
@@ -50,8 +57,18 @@ export interface UsageController {
   subscribe(listener: () => void): () => void
 }
 
+/** A day with all counters at zero. */
+function emptyDay(): DayUsage {
+  return {
+    requests: 0, messages: 0, sessions: 0, agentPrompts: 0,
+    inputTokens: 0, outputTokens: 0, cacheReadTokens: 0, cacheWriteTokens: 0,
+  }
+}
+
 /**
  * Load the store from disk, tolerating a missing or partially corrupt file.
+ * Stored token fields are accepted for backward compatibility but derived
+ * figures are always recomputed from the logs, so they are reset here.
  * @param filePath - the durable JSON path.
  * @returns the loaded day map.
  */
@@ -68,16 +85,54 @@ function loadStore(filePath: string): Record<string, DayUsage> {
         messages: Math.max(0, Number(value.messages) || 0),
         sessions: Math.max(0, Number(value.sessions) || 0),
         agentPrompts: Math.max(0, Number(value.agentPrompts) || 0),
-        inputTokens: Math.max(0, Number(value.inputTokens) || 0),
-        outputTokens: Math.max(0, Number(value.outputTokens) || 0),
-        cacheReadTokens: Math.max(0, Number(value.cacheReadTokens) || 0),
-        cacheWriteTokens: Math.max(0, Number(value.cacheWriteTokens) || 0),
+        inputTokens: 0,
+        outputTokens: 0,
+        cacheReadTokens: 0,
+        cacheWriteTokens: 0,
       }
     }
     return days
   } catch {
     return {}
   }
+}
+
+/** Per-day token totals and per-day/model splits, derived from the logs. */
+interface Derived {
+  perDay: Map<string, DayUsage>
+  perModel: Map<string, Record<string, TokenStats>>
+}
+
+/**
+ * Rebuild the derived per-day token totals and per-day/model map from the
+ * current per-file accounting.
+ */
+function rebuildDerived(fileAccounting: Map<string, TokenDays>): Derived {
+  const perDay = new Map<string, DayUsage>()
+  const perModel = new Map<string, Record<string, TokenStats>>()
+  for (const fileDays of fileAccounting.values()) {
+    for (const [key, tokens] of Object.entries(fileDays)) {
+      const day = perDay.get(key) ?? emptyDay()
+      day.inputTokens += tokens.inputTokens
+      day.outputTokens += tokens.outputTokens
+      day.cacheReadTokens += tokens.cacheReadTokens
+      day.cacheWriteTokens += tokens.cacheWriteTokens
+      perDay.set(key, day)
+      let byModel = perModel.get(key)
+      if (byModel === undefined) { byModel = {}; perModel.set(key, byModel) }
+      for (const [model, stats] of Object.entries(tokens.models)) {
+        const slot = byModel[model] ?? (byModel[model] = {
+          inputTokens: 0, outputTokens: 0, cacheReadTokens: 0, cacheWriteTokens: 0, messages: 0,
+        })
+        slot.inputTokens += stats.inputTokens
+        slot.outputTokens += stats.outputTokens
+        slot.cacheReadTokens += stats.cacheReadTokens
+        slot.cacheWriteTokens += stats.cacheWriteTokens
+        slot.messages += stats.messages
+      }
+    }
+  }
+  return { perDay, perModel }
 }
 
 /**
@@ -94,10 +149,20 @@ export function startUsageTracking(options: { dataDir: string; sessionsDir: stri
   let days = loadStore(filePath)
   const listeners = new Set<() => void>()
   let writeTimer: NodeJS.Timeout | null = null
+
+  // Token + per-model accounting, derived from the session logs in memory.
+  const fileAccounting = new Map<string, TokenDays>()
   const tokenKnown: Record<string, string> = {}
+  let firstScanPending = true
 
   const persist = (): void => {
-    const payload: UsageFile = { version: 1, days }
+    // Token fields are derived from the logs, not stored — write the HTTP
+    // counters only, so stale token figures never survive a restart.
+    const cleanDays: Record<string, DayUsage> = {}
+    for (const [key, day] of Object.entries(days)) {
+      cleanDays[key] = { ...emptyDay(), requests: day.requests, messages: day.messages, sessions: day.sessions, agentPrompts: day.agentPrompts }
+    }
+    const payload: UsageFile = { version: 1, days: cleanDays }
     const tmpPath = filePath + '.tmp'
     writeFileSync(tmpPath, JSON.stringify(payload))
     renameSync(tmpPath, filePath)
@@ -126,18 +191,15 @@ export function startUsageTracking(options: { dataDir: string; sessionsDir: stri
     }
   }
 
-  // Token accounting comes from the durable session logs: scan them in the
-  // background (incrementally — unchanged files are skipped by mtime/size)
-  // and merge the per-day totals into the store. The cold scan can take a
-  // few seconds, so it starts after the app's startup path has settled.
   let scanning = false
   const scanTokens = (): void => {
     if (scanning) return
     scanning = true
     try {
       const outcome = scanTokenLogs(options.sessionsDir, tokenKnown)
-      if (outcome.filesChanged > 0) {
-        mergeTokenUsage(days, outcome.days)
+      if (outcome.filesChanged > 0 || firstScanPending) {
+        for (const entry of outcome.changedFiles) fileAccounting.set(entry.path, entry.days)
+        firstScanPending = false
         scheduleWrite()
         notify()
       }
@@ -147,6 +209,8 @@ export function startUsageTracking(options: { dataDir: string; sessionsDir: stri
       scanning = false
     }
   }
+  // The cold scan can take a few seconds, so it starts after the app's
+  // startup path has settled; later scans are incremental.
   const firstScan = setTimeout(scanTokens, 2_000)
   firstScan.unref()
   const tokenTimer = setInterval(scanTokens, TOKEN_SCAN_INTERVAL_MS)
@@ -173,7 +237,32 @@ export function startUsageTracking(options: { dataDir: string; sessionsDir: stri
 
   return {
     filePath,
-    snapshot: (range: UsageRange): UsageSnapshot => buildSnapshot(days, range),
+    snapshot: (range: UsageRange): UsageSnapshot => {
+      const { perDay, perModel } = rebuildDerived(fileAccounting)
+      // Compose each day: persisted HTTP counters + derived token fields.
+      const view: Record<string, DayUsage> = {}
+      const addView = (key: string, base: DayUsage): void => {
+        const merged: DayUsage = {
+          ...base,
+          inputTokens: 0, outputTokens: 0, cacheReadTokens: 0, cacheWriteTokens: 0,
+        }
+        const tokens = perDay.get(key)
+        if (tokens !== undefined) {
+          merged.inputTokens = tokens.inputTokens
+          merged.outputTokens = tokens.outputTokens
+          merged.cacheReadTokens = tokens.cacheReadTokens
+          merged.cacheWriteTokens = tokens.cacheWriteTokens
+        }
+        view[key] = merged
+      }
+      for (const [key, day] of Object.entries(days)) addView(key, day)
+      for (const key of perDay.keys()) {
+        if (view[key] === undefined) addView(key, emptyDay())
+      }
+      const modelDays: Record<string, Record<string, TokenStats>> = {}
+      for (const [key, value] of perModel) modelDays[key] = value
+      return buildSnapshot(view, range, new Date(), modelDays)
+    },
     flush: () => {
       if (writeTimer !== null) {
         clearTimeout(writeTimer)

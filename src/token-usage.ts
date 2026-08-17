@@ -5,7 +5,8 @@
  * `<dshHome>/sessions/<projectKey>/<sessionId>/session.jsonl.zstd` (or
  * `session.jsonl` when compression is off). Each model step appends an
  * `assistant/message` event whose `data.usage` carries the provider's token
- * accounting — the only exact token source available to the desktop shell.
+ * accounting and `data.message.source.model` names the model — the only
+ * exact token source available to the desktop shell, with model attribution.
  *
  * The `.zstd` artifacts are a concatenation of independently decodable zstd
  * frames (one per append batch); Node's one-shot zstd APIs decode a single
@@ -14,10 +15,11 @@
  * ranges and decodes each frame separately. A torn trailing frame (a batch
  * being appended right now) is tolerated and picked up on the next scan.
  *
- * Scans are incremental: callers keep a `known` map of
- * `path → "mtimeMs:size"` and only re-read changed files. A full cold scan
- * of a heavy history takes a few seconds, so callers run it off the hot
- * path.
+ * Scans are incremental and report PER-FILE aggregates for changed files:
+ * unchanged files are skipped by an `mtimeMs:size` stamp map, and the caller
+ * keeps per-file bookkeeping so its day totals never double-count a re-read
+ * file (a changed file is re-aggregated in full and replaces its previous
+ * contribution).
  * @module token-usage
  */
 
@@ -26,30 +28,39 @@ import { readFileSync, readdirSync, statSync } from 'node:fs'
 import { join } from 'node:path'
 import { dateKey } from './usage.js'
 
-/** Token accounting extracted for one local calendar day. */
-export interface TokenDayUsage {
-  /** Un-cached model input tokens. */
+/** Token accounting for one visible scope (a day, or one model on a day). */
+export interface TokenStats {
   inputTokens: number
-  /** Model output tokens. */
   outputTokens: number
-  /** Prefix-cache reads (billed input). */
   cacheReadTokens: number
-  /** Prefix-cache writes (billed input). */
   cacheWriteTokens: number
-  /** Model steps whose accounting was folded into these totals. */
   messages: number
+}
+
+/** Token accounting extracted for one local calendar day. */
+export interface TokenDayUsage extends TokenStats {
+  /** The same totals split by model, keyed by model id. */
+  models: Record<string, TokenStats>
 }
 
 /** Aggregated token usage keyed by local `YYYY-MM-DD`. */
 export type TokenDays = Record<string, TokenDayUsage>
 
+/** One changed session log and the tokens it contributes, per day. */
+export interface ChangedLog {
+  /** Absolute path of the log file. */
+  path: string
+  /** Day-keyed aggregation of this file's whole current content. */
+  days: TokenDays
+}
+
 /** Outcome of one scan pass. */
 export interface TokenScanOutcome {
-  /** Token totals for every day seen in the scanned logs. */
-  days: TokenDays
-  /** Session log files inspected. */
+  /** Aggregates for every file that was re-read (changed or new). */
+  changedFiles: ChangedLog[]
+  /** Session log files inspected in total. */
   filesScanned: number
-  /** Files that were re-read (changed since the previous scan). */
+  /** Files re-read this pass. */
   filesChanged: number
 }
 
@@ -58,6 +69,16 @@ const LOG_NAMES = ['session.jsonl.zstd', 'session.jsonl'] as const
 
 /** Zstandard frame magic (`\x28\xb5\x2f\xfd` little-endian). */
 const ZSTD_MAGIC = 0xfd2fb528
+
+/** Empty day accumulator. */
+const emptyDay = (): TokenDayUsage => ({
+  inputTokens: 0,
+  outputTokens: 0,
+  cacheReadTokens: 0,
+  cacheWriteTokens: 0,
+  messages: 0,
+  models: {},
+})
 
 /**
  * Locate complete zstd frame ranges in a concatenated-frame artifact.
@@ -137,16 +158,32 @@ export function readSessionLog(path: string): string {
   }
 }
 
+/** Resolve the model name from an `assistant/message` payload. */
+function modelOf(record: { data?: { message?: { source?: { model?: unknown; replayState?: { model?: unknown } } } } }): string {
+  const source = record.data?.message?.source
+  if (typeof source?.model === 'string' && source.model !== '') return source.model
+  if (typeof source?.replayState?.model === 'string' && source.replayState.model !== '') return source.replayState.model
+  return '未知'
+}
+
 /**
  * Fold the `assistant/message` usage records of one log's plaintext into a
- * day map, attributing tokens to the event's local calendar day.
+ * day map, attributing tokens to the event's local calendar day. Per-day
+ * totals are split by the message's model so per-model charts can be drawn.
  * @param text - decoded JSONL text.
  * @param days - accumulator, mutated in place.
  */
 export function aggregateSessionText(text: string, days: TokenDays): void {
   for (const line of text.split('\n')) {
     if (!line.includes('assistant/message') || !line.includes('"usage"')) continue
-    let record: { type?: unknown; time?: unknown; data?: { usage?: Record<string, unknown> } }
+    let record: {
+      type?: unknown
+      time?: unknown
+      data?: {
+        usage?: Record<string, unknown>
+        message?: { source?: { model?: unknown; replayState?: { model?: unknown } } }
+      }
+    }
     try {
       record = JSON.parse(line) as typeof record
     } catch {
@@ -156,18 +193,25 @@ export function aggregateSessionText(text: string, days: TokenDays): void {
     const usage = record.data?.usage
     if (usage === undefined) continue
     const key = dateKey(new Date(record.time))
-    const day = days[key] ?? (days[key] = {
+    const day = days[key] ?? (days[key] = emptyDay())
+    day.inputTokens += num(usage.inputTokens)
+    day.outputTokens += num(usage.outputTokens)
+    day.cacheReadTokens += num(usage.cacheReadTokens)
+    day.cacheWriteTokens += num(usage.cacheWriteTokens)
+    day.messages += 1
+    const model = modelOf(record)
+    const stats = day.models[model] ?? (day.models[model] = {
       inputTokens: 0,
       outputTokens: 0,
       cacheReadTokens: 0,
       cacheWriteTokens: 0,
       messages: 0,
     })
-    day.inputTokens += num(usage.inputTokens)
-    day.outputTokens += num(usage.outputTokens)
-    day.cacheReadTokens += num(usage.cacheReadTokens)
-    day.cacheWriteTokens += num(usage.cacheWriteTokens)
-    day.messages += 1
+    stats.inputTokens += num(usage.inputTokens)
+    stats.outputTokens += num(usage.outputTokens)
+    stats.cacheReadTokens += num(usage.cacheReadTokens)
+    stats.cacheWriteTokens += num(usage.cacheWriteTokens)
+    stats.messages += 1
   }
 }
 
@@ -178,14 +222,15 @@ function num(value: unknown): number {
 
 /**
  * Scan every session log under the sessions directory, re-reading only the
- * files whose mtime or size changed since the caller's last pass.
+ * files whose mtime or size changed since the caller's last pass, and
+ * reporting each changed file's full current aggregation.
  * @param sessionsDir - `<dshHome>/sessions` (absent dirs scan as empty).
  * @param known - caller-held `path → "mtimeMs:size"` cache, replaced in
  *   place with the new state as files are successfully re-read.
- * @returns the aggregated token days plus scan bookkeeping.
+ * @returns per-file aggregates for changed files plus scan bookkeeping.
  */
 export function scanTokenLogs(sessionsDir: string, known: Record<string, string>): TokenScanOutcome {
-  const days: TokenDays = {}
+  const changedFiles: ChangedLog[] = []
   const knownNext: Record<string, string> = {}
   let filesScanned = 0
   let filesChanged = 0
@@ -216,7 +261,9 @@ export function scanTokenLogs(sessionsDir: string, known: Record<string, string>
           }
           const text = readSessionLog(path)
           if (text.length === 0) continue
+          const days: TokenDays = {}
           aggregateSessionText(text, days)
+          changedFiles.push({ path, days })
           knownNext[path] = stamp
           filesChanged += 1
         }
@@ -231,5 +278,5 @@ export function scanTokenLogs(sessionsDir: string, known: Record<string, string>
     if (!(key in knownNext)) delete known[key]
   }
   Object.assign(known, knownNext)
-  return { days, filesScanned, filesChanged }
+  return { changedFiles, filesScanned, filesChanged }
 }
