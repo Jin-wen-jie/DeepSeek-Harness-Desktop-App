@@ -48,7 +48,17 @@ import { STATE_LABELS, createLoaderStatusStore, createSignal } from './loader-st
 import './base.css'
 
 /** Module transport hook the shell passes through (jsdom tests replace the <script> path). */
-export type BootSeams = Pick<ClientModuleSystemOptions, 'loadBundle'>
+export interface BootSeams {
+  /** Bundle-load hook override (jsdom tests replace the <script> path). */
+  loadBundle?: ClientModuleSystemOptions['loadBundle']
+  /**
+   * Shell-owned modules registered statically in place of graph rows (first
+   * non-web consumer: the desktop renderer injects its transport-bound
+   * connection carrier under the web package name so the runtime's
+   * `inject: ['connection']` edges resolve without a fetched bundle).
+   */
+  statics?: Record<string, unknown>
+}
 
 /**
  * The modules package's own graph row id. The kernel adopts that entry
@@ -98,7 +108,11 @@ export class AppWebEntry {
     this.manifest = parseBootManifest((globalThis as DshWindow).__DSH_BOOT__)
 
     this.modules = new ClientModuleSystem({
-      modules: this.manifest.modules, staticModules: getStaticModules(), ...this.seams,
+      modules: this.manifest.modules,
+      staticModules: getStaticModules(),
+      // exactOptionalPropertyTypes: spread would hand the target an explicit
+      // `undefined`, so pass loadBundle only when the seam actually provides it.
+      ...(this.seams?.loadBundle === undefined ? {} : { loadBundle: this.seams.loadBundle }),
     })
     // The app-shell assembly is the only shell-own module: every other graph
     // row is a plugin bundle arriving through fetch.
@@ -109,6 +123,9 @@ export class AppWebEntry {
     // trigger a real fetch), and put the instance on the kernel slot the
     // wrapper's apply reads to provide ctx.modules.
     this.modules.registerStatic(MODULES_ID, ModulesClient)
+    for (const [id, module] of Object.entries(this.seams?.statics ?? {})) {
+      this.modules.registerStatic(id, module)
+    }
     ;(globalThis as DshWindow).__DSH_MODULES__ = this.modules
 
     this.root = createRoot(this.el)

@@ -37,8 +37,11 @@ export {
 } from './api.ts'
 
 // Connection loop types are public through ConnectionHandle.start; the
-// controller remains package-internal.
+// controller is exported so transport-specific carriers (e.g. the desktop IPC
+// carrier) can reuse the generation/reconnect/handshake loop unchanged instead
+// of reimplementing it.
 export type { ConnectionConfig, ConnectionSinks, ConnectionState }
+export { ConnectionController } from './connection.ts'
 export type { ClientConnectionRpc } from '../rpc.ts'
 
 /** Observable Host description published by each completed connection handshake. */

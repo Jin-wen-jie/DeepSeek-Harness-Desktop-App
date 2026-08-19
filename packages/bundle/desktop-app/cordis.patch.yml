@@ -1,0 +1,114 @@
+# The dsh-desktop-app bundle patch: the desktop host over the dsh-base layer.
+# Applied after dsh-base's insert; rows here override base rows by id, with
+# the profile's own cordis.patch.yml and any --patch overlays still to come.
+#
+# A patch replaces the targeted row's whole `config`, so each row below
+# restates every key it owns.
+#
+# Unlike the web bundle, this composition opens NO TCP listener and serves NO
+# static frontend. The Host process entry (apps/desktop/src/host/bin.ts) boots
+# this profile over Electron-as-node, then adapts the stdio line protocol to
+# the fetch-shaped Host API and the two event streams the api-gateway exposes.
+# The desktop-runtime glue below materializes those streams from ctx.apiProxy.
+#
+# The browser roster (connection-desktop transport row, api-remotes,
+# client-runtime, ui-*) is NOT mounted here: the desktop carrier is
+# transport-injected (a Renderer boot passes the preload transport into
+# `createDesktopConnection`), so the roster is composed by the desktop Renderer
+# entry in Phase 3, not by a static bundle row.
+
+# ── surface-specific values the base deliberately omits ─────────────────────
+
+- id: system-prompt
+  config:
+    persona: >-
+      You are a coding agent powered by the {{model}} model. Your working directory is {{cwd}}.
+
+# HMR is a Web dev-time chain; the desktop shell loads built artifacts, so it
+# is off (kept consistent with the web overlay).
+- id: hmr
+  disabled: true
+
+# Full-text session search is opt-in (the base row's `openAt: never`). This
+# restatement keeps an ephemeral in-memory index so the desktop host starts
+# without building a persistent search index.
+- id: session-query-sqlite
+  config:
+    path: ':memory:'
+    openAt: never
+
+- id: tools
+  config:
+    mode: !!js process.env.DSH_TOOLS_MODE
+
+# ── desktop host rows: the API gateway + the support services it consumes ───
+
+- insert:
+    - id: code-runtime
+      name: '@deepseek-ai/dsh-code-runtime-worker-thread'
+
+    - id: storage
+      name: '@deepseek-ai/dsh-storage'
+
+    - id: storage-json
+      name: '@deepseek-ai/dsh-storage-json'
+      config:
+        root: !!js dshHomePath('storages')
+
+    - id: storage-domain
+      name: '@deepseek-ai/dsh-storage-domain'
+      config:
+        backend: json
+
+    - id: message-feedback
+      name: '@deepseek-ai/dsh-message-feedback'
+      config:
+        maxNoteBytes: 8192
+
+    ## Browser Session export lives behind the web /export download dialog; the
+    ## desktop shell mounts the shared session-log export the same way.
+    - id: session-log-download
+      name: '@deepseek-ai/dsh-session-log-export'
+
+    - id: workspace
+      name: '@deepseek-ai/dsh-workspace'
+
+    - id: session-projection-cache
+      name: '@deepseek-ai/dsh-session-projection-cache'
+      config:
+        writeEveryEvents: 200
+        writeIntervalMs: 5000
+
+    - id: session-stats
+      name: '@deepseek-ai/dsh-session-stats'
+
+    ## Native OS directory chooser (the `-auto` variant needs a web server to
+    ## select a backend, which the desktop never runs; -native is the desktop
+    ## picker and is the Electron-as-node-friendly backend per the plan).
+    - id: directory-picker
+      name: '@deepseek-ai/dsh-host-directory-picker-native'
+
+    ## Read-only projection of current Loader entries for trusted client RPCs.
+    - id: plugin-inventory
+      name: '@deepseek-ai/dsh-host-plugin-inventory'
+
+    ## The API gateway: the transport-agnostic dispatch face every client shape
+    ## shares. The desktop bridge calls toFetchHandler(ctx.apiProxy).fetch and
+    ## iterates ctx.apiProxy.events; no HTTP/SSE layer is involved.
+    - id: api-gateway
+      name: '@deepseek-ai/dsh-host-apiproxy'
+
+    - id: cordis-host-runner
+      name: '@deepseek-ai/dsh-cordis-host-runner'
+
+    ## Desktop glue owned by this bundle: resolves the fetch handler and the
+    ## mux/host streams off the composed apiProxy and provides them as the
+    ## `desktopRuntime` service for the Host process entry's bridge.
+    - id: desktop-runtime
+      name: '@deepseek-ai/dsh-desktop-app'
+
+    ## The renderer owns its client roster. Its welcome acknowledgement only
+    ## needs this Host registration; mounting browser plugins in this process
+    ## leaves the Loader waiting for browser-only services.
+    - id: desktop-client-ui-settings-general
+      name: '@deepseek-ai/dsh-client-ui-settings-general'

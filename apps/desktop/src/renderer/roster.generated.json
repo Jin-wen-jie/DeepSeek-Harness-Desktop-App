@@ -1,0 +1,438 @@
+{
+  "rev": "a9980188c867",
+  "entries": [
+    {
+      "id": "@deepseek-ai/dsh-api-gateway",
+      "url": "app://desktop/bundle/%40deepseek-ai%2Fdsh-api-gateway/client.js",
+      "rev": "desktop-scan",
+      "inject": [
+        "@deepseek-ai/dsh-typert-registry",
+        "@deepseek-ai/dsh-client-connection"
+      ],
+      "immediately": true
+    },
+    {
+      "id": "@deepseek-ai/dsh-api-remotes",
+      "url": "app://desktop/bundle/%40deepseek-ai%2Fdsh-api-remotes/client.js",
+      "rev": "desktop-scan",
+      "inject": [
+        "@deepseek-ai/dsh-api-gateway"
+      ],
+      "immediately": true
+    },
+    {
+      "id": "@deepseek-ai/dsh-client-connection",
+      "url": "app://desktop/bundle/%40deepseek-ai%2Fdsh-client-connection/client.js",
+      "rev": "desktop-scan",
+      "inject": [],
+      "immediately": true
+    },
+    {
+      "id": "@deepseek-ai/dsh-client-hmr",
+      "url": "app://desktop/bundle/%40deepseek-ai%2Fdsh-client-hmr/client.js",
+      "rev": "desktop-scan",
+      "inject": [],
+      "immediately": true
+    },
+    {
+      "id": "@deepseek-ai/dsh-client-locale",
+      "url": "app://desktop/bundle/%40deepseek-ai%2Fdsh-client-locale/client.js",
+      "rev": "desktop-scan",
+      "inject": [
+        "@deepseek-ai/dsh-client-connection",
+        "@deepseek-ai/dsh-client-runtime",
+        "@deepseek-ai/dsh-client-ui-settings",
+        "@deepseek-ai/dsh-api-remotes"
+      ],
+      "immediately": true
+    },
+    {
+      "id": "@deepseek-ai/dsh-client-modules",
+      "url": "app://desktop/bundle/%40deepseek-ai%2Fdsh-client-modules/client.js",
+      "rev": "desktop-scan",
+      "inject": [],
+      "immediately": true
+    },
+    {
+      "id": "@deepseek-ai/dsh-client-runtime",
+      "url": "app://desktop/bundle/%40deepseek-ai%2Fdsh-client-runtime/client.js",
+      "rev": "desktop-scan",
+      "inject": [
+        "@deepseek-ai/dsh-client-connection",
+        "@deepseek-ai/dsh-typert-registry",
+        "@deepseek-ai/dsh-api-remotes"
+      ],
+      "immediately": true
+    },
+    {
+      "id": "@deepseek-ai/dsh-client-ui-agent-preset",
+      "url": "app://desktop/bundle/%40deepseek-ai%2Fdsh-client-ui-agent-preset/client.js",
+      "rev": "desktop-scan",
+      "inject": [
+        "@deepseek-ai/dsh-client-connection",
+        "@deepseek-ai/dsh-client-locale",
+        "@deepseek-ai/dsh-client-runtime",
+        "@deepseek-ai/dsh-client-ui-conversation",
+        "@deepseek-ai/dsh-client-ui-settings",
+        "@deepseek-ai/dsh-api-remotes"
+      ],
+      "immediately": false
+    },
+    {
+      "id": "@deepseek-ai/dsh-client-ui-commands",
+      "url": "app://desktop/bundle/%40deepseek-ai%2Fdsh-client-ui-commands/client.js",
+      "rev": "desktop-scan",
+      "inject": [
+        "@deepseek-ai/dsh-api-remotes",
+        "@deepseek-ai/dsh-client-runtime",
+        "@deepseek-ai/dsh-client-locale",
+        "@deepseek-ai/dsh-client-ui-input-trigger",
+        "@deepseek-ai/dsh-client-ui-conversation"
+      ],
+      "immediately": false
+    },
+    {
+      "id": "@deepseek-ai/dsh-client-ui-conversation",
+      "url": "app://desktop/bundle/%40deepseek-ai%2Fdsh-client-ui-conversation/client.js",
+      "rev": "desktop-scan",
+      "inject": [
+        "@deepseek-ai/dsh-client-connection",
+        "@deepseek-ai/dsh-client-locale",
+        "@deepseek-ai/dsh-client-runtime",
+        "@deepseek-ai/dsh-client-ui-settings",
+        "@deepseek-ai/dsh-api-remotes",
+        "@deepseek-ai/dsh-client-ui-layout"
+      ],
+      "immediately": false
+    },
+    {
+      "id": "@deepseek-ai/dsh-client-ui-deliverables",
+      "url": "app://desktop/bundle/%40deepseek-ai%2Fdsh-client-ui-deliverables/client.js",
+      "rev": "desktop-scan",
+      "inject": [
+        "@deepseek-ai/dsh-client-connection",
+        "@deepseek-ai/dsh-client-locale",
+        "@deepseek-ai/dsh-client-runtime",
+        "@deepseek-ai/dsh-client-ui-conversation"
+      ],
+      "immediately": false
+    },
+    {
+      "id": "@deepseek-ai/dsh-client-ui-directory-picker-native",
+      "url": "app://desktop/bundle/%40deepseek-ai%2Fdsh-client-ui-directory-picker-native/client.js",
+      "rev": "desktop-scan",
+      "inject": [
+        "@deepseek-ai/dsh-client-runtime",
+        "@deepseek-ai/dsh-client-ui-workspace"
+      ],
+      "immediately": false
+    },
+    {
+      "id": "@deepseek-ai/dsh-client-ui-goal",
+      "url": "app://desktop/bundle/%40deepseek-ai%2Fdsh-client-ui-goal/client.js",
+      "rev": "desktop-scan",
+      "inject": [
+        "@deepseek-ai/dsh-client-runtime",
+        "@deepseek-ai/dsh-api-remotes",
+        "@deepseek-ai/dsh-client-locale",
+        "@deepseek-ai/dsh-client-ui-conversation"
+      ],
+      "immediately": false
+    },
+    {
+      "id": "@deepseek-ai/dsh-client-ui-input-trigger",
+      "url": "app://desktop/bundle/%40deepseek-ai%2Fdsh-client-ui-input-trigger/client.js",
+      "rev": "desktop-scan",
+      "inject": [
+        "@deepseek-ai/dsh-client-runtime",
+        "@deepseek-ai/dsh-client-locale"
+      ],
+      "immediately": false
+    },
+    {
+      "id": "@deepseek-ai/dsh-client-ui-jobs",
+      "url": "app://desktop/bundle/%40deepseek-ai%2Fdsh-client-ui-jobs/client.js",
+      "rev": "desktop-scan",
+      "inject": [
+        "@deepseek-ai/dsh-client-locale",
+        "@deepseek-ai/dsh-client-runtime",
+        "@deepseek-ai/dsh-client-ui-conversation",
+        "@deepseek-ai/dsh-client-ui-primitives"
+      ],
+      "immediately": false
+    },
+    {
+      "id": "@deepseek-ai/dsh-client-ui-layout",
+      "url": "app://desktop/bundle/%40deepseek-ai%2Fdsh-client-ui-layout/client.js",
+      "rev": "desktop-scan",
+      "inject": [
+        "@deepseek-ai/dsh-client-runtime",
+        "@deepseek-ai/dsh-client-ui-theme"
+      ],
+      "immediately": false
+    },
+    {
+      "id": "@deepseek-ai/dsh-client-ui-message-feedback",
+      "url": "app://desktop/bundle/%40deepseek-ai%2Fdsh-client-ui-message-feedback/client.js",
+      "rev": "desktop-scan",
+      "inject": [
+        "@deepseek-ai/dsh-client-runtime",
+        "@deepseek-ai/dsh-api-remotes",
+        "@deepseek-ai/dsh-client-locale",
+        "@deepseek-ai/dsh-client-ui-conversation"
+      ],
+      "immediately": false
+    },
+    {
+      "id": "@deepseek-ai/dsh-client-ui-model-selection",
+      "url": "app://desktop/bundle/%40deepseek-ai%2Fdsh-client-ui-model-selection/client.js",
+      "rev": "desktop-scan",
+      "inject": [
+        "@deepseek-ai/dsh-client-locale",
+        "@deepseek-ai/dsh-client-runtime",
+        "@deepseek-ai/dsh-client-ui-commands",
+        "@deepseek-ai/dsh-api-remotes"
+      ],
+      "immediately": false
+    },
+    {
+      "id": "@deepseek-ai/dsh-client-ui-permission-presets",
+      "url": "app://desktop/bundle/%40deepseek-ai%2Fdsh-client-ui-permission-presets/client.js",
+      "rev": "desktop-scan",
+      "inject": [
+        "@deepseek-ai/dsh-client-connection",
+        "@deepseek-ai/dsh-client-locale",
+        "@deepseek-ai/dsh-client-runtime",
+        "@deepseek-ai/dsh-client-ui-commands",
+        "@deepseek-ai/dsh-api-remotes",
+        "@deepseek-ai/dsh-client-ui-settings"
+      ],
+      "immediately": false
+    },
+    {
+      "id": "@deepseek-ai/dsh-client-ui-plan",
+      "url": "app://desktop/bundle/%40deepseek-ai%2Fdsh-client-ui-plan/client.js",
+      "rev": "desktop-scan",
+      "inject": [
+        "@deepseek-ai/dsh-api-remotes",
+        "@deepseek-ai/dsh-client-locale",
+        "@deepseek-ai/dsh-client-ui-conversation"
+      ],
+      "immediately": false
+    },
+    {
+      "id": "@deepseek-ai/dsh-client-ui-settings",
+      "url": "app://desktop/bundle/%40deepseek-ai%2Fdsh-client-ui-settings/client.js",
+      "rev": "desktop-scan",
+      "inject": [
+        "@deepseek-ai/dsh-client-connection",
+        "@deepseek-ai/dsh-client-runtime",
+        "@deepseek-ai/dsh-api-remotes"
+      ],
+      "immediately": false
+    },
+    {
+      "id": "@deepseek-ai/dsh-client-ui-settings-general",
+      "url": "app://desktop/bundle/%40deepseek-ai%2Fdsh-client-ui-settings-general/client.js",
+      "rev": "desktop-scan",
+      "inject": [
+        "@deepseek-ai/dsh-client-runtime",
+        "@deepseek-ai/dsh-client-ui-settings",
+        "@deepseek-ai/dsh-client-locale",
+        "@deepseek-ai/dsh-client-connection",
+        "@deepseek-ai/dsh-api-remotes",
+        "@deepseek-ai/dsh-client-ui-sidebar"
+      ],
+      "immediately": false
+    },
+    {
+      "id": "@deepseek-ai/dsh-client-ui-settings-models",
+      "url": "app://desktop/bundle/%40deepseek-ai%2Fdsh-client-ui-settings-models/client.js",
+      "rev": "desktop-scan",
+      "inject": [
+        "@deepseek-ai/dsh-client-runtime",
+        "@deepseek-ai/dsh-client-ui-settings",
+        "@deepseek-ai/dsh-client-locale",
+        "@deepseek-ai/dsh-api-remotes"
+      ],
+      "immediately": false
+    },
+    {
+      "id": "@deepseek-ai/dsh-client-ui-settings-plugin-inventory",
+      "url": "app://desktop/bundle/%40deepseek-ai%2Fdsh-client-ui-settings-plugin-inventory/client.js",
+      "rev": "desktop-scan",
+      "inject": [
+        "@deepseek-ai/dsh-api-remotes",
+        "@deepseek-ai/dsh-client-runtime",
+        "@deepseek-ai/dsh-client-ui-settings",
+        "@deepseek-ai/dsh-client-locale"
+      ],
+      "immediately": false
+    },
+    {
+      "id": "@deepseek-ai/dsh-client-ui-settings-plugins",
+      "url": "app://desktop/bundle/%40deepseek-ai%2Fdsh-client-ui-settings-plugins/client.js",
+      "rev": "desktop-scan",
+      "inject": [
+        "@deepseek-ai/dsh-client-connection",
+        "@deepseek-ai/dsh-client-locale",
+        "@deepseek-ai/dsh-client-runtime",
+        "@deepseek-ai/dsh-client-ui-settings",
+        "@deepseek-ai/dsh-api-remotes"
+      ],
+      "immediately": false
+    },
+    {
+      "id": "@deepseek-ai/dsh-client-ui-sidebar",
+      "url": "app://desktop/bundle/%40deepseek-ai%2Fdsh-client-ui-sidebar/client.js",
+      "rev": "desktop-scan",
+      "inject": [
+        "@deepseek-ai/dsh-client-runtime",
+        "@deepseek-ai/dsh-client-ui-layout",
+        "@deepseek-ai/dsh-client-locale"
+      ],
+      "immediately": false
+    },
+    {
+      "id": "@deepseek-ai/dsh-client-ui-skill",
+      "url": "app://desktop/bundle/%40deepseek-ai%2Fdsh-client-ui-skill/client.js",
+      "rev": "desktop-scan",
+      "inject": [
+        "@deepseek-ai/dsh-client-runtime",
+        "@deepseek-ai/dsh-client-locale",
+        "@deepseek-ai/dsh-client-ui-tool",
+        "@deepseek-ai/dsh-client-ui-input-trigger",
+        "@deepseek-ai/dsh-api-remotes"
+      ],
+      "immediately": false
+    },
+    {
+      "id": "@deepseek-ai/dsh-client-ui-subagent",
+      "url": "app://desktop/bundle/%40deepseek-ai%2Fdsh-client-ui-subagent/client.js",
+      "rev": "desktop-scan",
+      "inject": [
+        "@deepseek-ai/dsh-client-locale",
+        "@deepseek-ai/dsh-client-runtime",
+        "@deepseek-ai/dsh-client-ui-conversation",
+        "@deepseek-ai/dsh-client-ui-primitives",
+        "@deepseek-ai/dsh-client-ui-input-trigger"
+      ],
+      "immediately": false
+    },
+    {
+      "id": "@deepseek-ai/dsh-client-ui-theme",
+      "url": "app://desktop/bundle/%40deepseek-ai%2Fdsh-client-ui-theme/client.js",
+      "rev": "desktop-scan",
+      "inject": [
+        "@deepseek-ai/dsh-client-connection",
+        "@deepseek-ai/dsh-client-runtime",
+        "@deepseek-ai/dsh-client-locale",
+        "@deepseek-ai/dsh-client-ui-settings",
+        "@deepseek-ai/dsh-api-remotes"
+      ],
+      "immediately": true
+    },
+    {
+      "id": "@deepseek-ai/dsh-client-ui-tool",
+      "url": "app://desktop/bundle/%40deepseek-ai%2Fdsh-client-ui-tool/client.js",
+      "rev": "desktop-scan",
+      "inject": [
+        "@deepseek-ai/dsh-client-runtime",
+        "@deepseek-ai/dsh-client-locale",
+        "@deepseek-ai/dsh-client-ui-conversation"
+      ],
+      "immediately": false
+    },
+    {
+      "id": "@deepseek-ai/dsh-client-ui-trajectory",
+      "url": "app://desktop/bundle/%40deepseek-ai%2Fdsh-client-ui-trajectory/client.js",
+      "rev": "desktop-scan",
+      "inject": [
+        "@deepseek-ai/dsh-client-locale",
+        "@deepseek-ai/dsh-client-runtime",
+        "@deepseek-ai/dsh-client-ui-conversation"
+      ],
+      "immediately": false
+    },
+    {
+      "id": "@deepseek-ai/dsh-client-ui-user-questions",
+      "url": "app://desktop/bundle/%40deepseek-ai%2Fdsh-client-ui-user-questions/client.js",
+      "rev": "desktop-scan",
+      "inject": [
+        "@deepseek-ai/dsh-client-locale",
+        "@deepseek-ai/dsh-client-ui-conversation"
+      ],
+      "immediately": false
+    },
+    {
+      "id": "@deepseek-ai/dsh-client-ui-workflow-run",
+      "url": "app://desktop/bundle/%40deepseek-ai%2Fdsh-client-ui-workflow-run/client.js",
+      "rev": "desktop-scan",
+      "inject": [
+        "@deepseek-ai/dsh-client-locale",
+        "@deepseek-ai/dsh-client-runtime",
+        "@deepseek-ai/dsh-client-ui-conversation"
+      ],
+      "immediately": false
+    },
+    {
+      "id": "@deepseek-ai/dsh-client-ui-workspace",
+      "url": "app://desktop/bundle/%40deepseek-ai%2Fdsh-client-ui-workspace/client.js",
+      "rev": "desktop-scan",
+      "inject": [
+        "@deepseek-ai/dsh-client-locale",
+        "@deepseek-ai/dsh-client-runtime",
+        "@deepseek-ai/dsh-client-ui-conversation",
+        "@deepseek-ai/dsh-client-ui-sidebar"
+      ],
+      "immediately": false
+    },
+    {
+      "id": "@deepseek-ai/dsh-cordis-client-runner",
+      "url": "app://desktop/bundle/%40deepseek-ai%2Fdsh-cordis-client-runner/client.js",
+      "rev": "desktop-scan",
+      "inject": [
+        "@deepseek-ai/dsh-client-runtime",
+        "@deepseek-ai/dsh-api-remotes",
+        "@deepseek-ai/dsh-client-modules",
+        "@deepseek-ai/dsh-client-ui-theme"
+      ],
+      "immediately": false
+    },
+    {
+      "id": "@deepseek-ai/dsh-client-ui-cordis",
+      "url": "app://desktop/bundle/%40deepseek-ai%2Fdsh-client-ui-cordis/client.js",
+      "rev": "desktop-scan",
+      "inject": [
+        "@deepseek-ai/dsh-client-runtime",
+        "@deepseek-ai/dsh-client-connection",
+        "@deepseek-ai/dsh-cordis-client-runner",
+        "@deepseek-ai/dsh-api-remotes",
+        "@deepseek-ai/dsh-client-locale",
+        "@deepseek-ai/dsh-client-ui-input-trigger",
+        "@deepseek-ai/dsh-client-ui-tool",
+        "@deepseek-ai/dsh-client-ui-sidebar"
+      ],
+      "immediately": false
+    },
+    {
+      "id": "@deepseek-ai/dsh-session-log-export",
+      "url": "app://desktop/bundle/%40deepseek-ai%2Fdsh-session-log-export/client.js",
+      "rev": "desktop-scan",
+      "inject": [
+        "@deepseek-ai/dsh-client-locale",
+        "@deepseek-ai/dsh-client-runtime",
+        "@deepseek-ai/dsh-client-ui-commands",
+        "@deepseek-ai/dsh-client-ui-conversation"
+      ],
+      "immediately": false
+    },
+    {
+      "id": "@deepseek-ai/dsh-typert-registry",
+      "url": "app://desktop/bundle/%40deepseek-ai%2Fdsh-typert-registry/client.js",
+      "rev": "desktop-scan",
+      "inject": [],
+      "immediately": true
+    }
+  ]
+}

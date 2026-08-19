@@ -32,13 +32,40 @@ interface Koffi {
  * Read a NUL-terminated UTF-16 string at a native address. koffi's
  * `_Out_ void **` out-params surface a raw address, and
  * `koffi.decode(addr, 'str16')` would dereference it as a pointer — crash
- * on real Windows — so view the memory directly instead.
+ * on real Windows. `koffi.view()` cannot be used either: when the worker
+ * runs under Electron-as-node (how the desktop shell launches the bundled
+ * dsh), koffi 3.1.x aborts the process natively inside view() with
+ * `FATAL ERROR: Error::New napi_get_last_error_info` — a hard process
+ * death, so the worker can never report the picked path. Copy the string
+ * with RtlMoveMemory into plain JS buffers instead, a path that only uses
+ * koffi.call and is safe on both plain Node and Electron-as-node.
  */
 function readUtf16(koffi: Koffi, address: unknown): string {
-  const bytes = Buffer.from(koffi.view(address, 32768))
-  let end = 0
-  while (end + 1 < bytes.length && bytes[end] !== 0) end += 2
-  return bytes.toString('utf16le', 0, end)
+  if (!address) return ''
+  const base = typeof address === 'bigint' ? Number(address) : (address as number)
+  const kernel32 = koffi.load('kernel32.dll')
+  const copyMemory = kernel32.func('__stdcall', 'RtlMoveMemory', 'void', ['void *', 'void *', 'uintptr'])
+  const CHUNK = 512
+  const chunks: Buffer[] = []
+  let offset = 0
+  for (let i = 0; i < 2048; i++) {
+    const dest = Buffer.alloc(CHUNK)
+    copyMemory(dest, base + offset, CHUNK)
+    let end = -1
+    for (let j = 0; j + 1 < dest.length; j += 2) {
+      if (dest[j] === 0 && dest[j + 1] === 0) {
+        end = j
+        break
+      }
+    }
+    if (end >= 0) {
+      chunks.push(dest.subarray(0, end))
+      break
+    }
+    chunks.push(dest)
+    offset += CHUNK
+  }
+  return Buffer.concat(chunks).toString('utf16le')
 }
 
 const COINIT_APARTMENTTHREADED = 0x2

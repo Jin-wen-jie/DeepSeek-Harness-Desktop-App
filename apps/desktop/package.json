@@ -1,0 +1,28 @@
+{
+  "name": "@deepseek-ai/dsh-desktop",
+  "description": "Deepseek Harness desktop shell and IPC host supervisor",
+  "version": "0.1.0-rc.5",
+  "private": true,
+  "type": "module",
+  "main": "lib/main/index.js",
+  "scripts": {
+    "build": "tsc -b tsconfig.json && node scripts/gen-renderer-roster.mjs && node scripts/build-renderer.mjs && node scripts/copy-renderer.mjs",
+    "start": "electron lib/main/index.js",
+    "test": "vitest run --config vitest.config.ts"
+  },
+  "dependencies": {
+    "@deepseek-ai/dsh-app-boot": "workspace:^",
+    "@deepseek-ai/dsh-base": "workspace:^",
+    "@deepseek-ai/dsh-cmdline": "workspace:^",
+    "@deepseek-ai/dsh-desktop-app": "workspace:^",
+    "@deepseek-ai/dsh-home-paths": "workspace:^",
+    "@deepseek-ai/dsh-host-apiproxy": "workspace:^",
+    "@deepseek-ai/dsh-launch-environment": "workspace:^",
+    "electron": "^37.2.6"
+  },
+  "devDependencies": {
+    "@types/node": "^24.0.0",
+    "esbuild": "^0.25.0",
+    "vitest": "^4.1.8"
+  }
+}

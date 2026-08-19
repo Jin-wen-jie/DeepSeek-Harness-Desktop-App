@@ -1,0 +1,23 @@
+{
+  "extends": "../../tsconfig.base.json",
+  "compilerOptions": {
+    "rootDir": "src",
+    "outDir": "lib",
+    "noEmit": false,
+    "resolveJsonModule": true
+  },
+  // The renderer boot is Client-face (imports the web shell + carrier source);
+  // esbuild bundles it separately. Exclude it from the Host program so the
+  // Host aggregate never sees client-face source.
+  "exclude": ["src/renderer/desktop-boot.ts", "src/renderer/roster.generated.json"],
+  "include": ["src"],
+  "references": [
+    { "path": "../../packages/host/apiproxy" },
+    { "path": "../../packages/boot/app-boot" },
+    { "path": "../../packages/boot/cmdline" },
+    { "path": "../../packages/bundle/base" },
+    { "path": "../../packages/bundle/desktop-app" },
+    { "path": "../../packages/util/home-paths" },
+    { "path": "../../packages/util/launch-environment" }
+  ]
+}

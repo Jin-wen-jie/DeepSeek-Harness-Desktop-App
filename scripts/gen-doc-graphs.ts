@@ -544,8 +544,15 @@ const SERVICE_ROLES: ServiceRole[] = [
     pkg: 'apiproxy',
     title: 'Host API dispatch',
     mode: 'core',
-    consumers: ['connection'],
+    consumers: ['connection', 'desktop-app'],
     note: 'The transport-agnostic host gateway face: it dispatches browser API calls, and each open host stream subscribes to the events it forwards rather than being pushed to through a broadcast verb.',
+  },
+  {
+    key: 'desktopRuntime',
+    pkg: 'desktop-app',
+    title: 'Desktop IPC bridge runtime',
+    mode: 'bundle',
+    note: 'Materializes the unified Host fetch handler and event streams for the supervised desktop Host process; it opens no network listener.',
   },
   {
     key: 'dynamicCordisRunner',

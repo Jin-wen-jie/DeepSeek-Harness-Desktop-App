@@ -250,6 +250,14 @@ respond(message: ClientResponse): Promise<RpcReceipt>
 
 Source: [`packages/host/apiproxy/src/api/index.ts:22`](../../packages/host/apiproxy/src/api/index.ts)
 
+<a id="ctxdesktopruntime--desktopruntimevalues"></a>
+
+### `ctx.desktopRuntime` — `DesktopRuntimeValues`
+
+The Host-side surfaces the desktop bridge adapts: one fetch handler + two event streams.
+
+Source: [`packages/bundle/desktop-app/src/index.ts:25`](../../packages/bundle/desktop-app/src/index.ts)
+
 <a id="ctxtypert--typertregistry"></a>
 
 ### `ctx.typert` — `TypertRegistry`
